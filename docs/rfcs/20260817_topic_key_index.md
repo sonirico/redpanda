@@ -6,7 +6,7 @@ Status: proof of concept, not yet compiled against a full toolchain; branch: htt
 - Status: draft
 - Start Date: 2026-08-17
 - Authors: Marcos Benedicto
-- Issue: none
+- Issue: none (discussion: https://github.com/redpanda-data/redpanda/discussions/31597)
 
 # Executive Summary
 
