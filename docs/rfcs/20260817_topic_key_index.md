@@ -1,6 +1,6 @@
 # Topic key index (redpanda.kv.index.enabled)
 
-Status: proof of concept, not yet compiled against a full toolchain; branch: <BRANCH_URL>
+Status: proof of concept, not yet compiled against a full toolchain; branch: https://github.com/sonirico/redpanda/tree/plan/redpanda-kv-index-poc (staging PR: https://github.com/sonirico/redpanda/pull/1)
 
 - Feature Name: topic_key_index
 - Status: draft
