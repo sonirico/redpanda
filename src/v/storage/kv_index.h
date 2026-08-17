@@ -17,6 +17,7 @@
 #include "lsm/lsm.h"
 #include "model/fundamental.h"
 #include "model/record.h"
+#include "storage/offset_translator_state.h"
 
 #include <seastar/core/future.hh>
 #include <seastar/core/gate.hh>
@@ -29,13 +30,14 @@
 
 namespace storage {
 
-/// Per-partition secondary index mapping raw record keys to the log offset
-/// of the latest record carrying that key.
+/// Per-partition secondary index mapping raw record keys to the Kafka
+/// offset of the latest record carrying that key.
 ///
 /// Backed by lsm::database (no WAL) with disk persistence under
 /// options::dir; rebuildable from the log: after open, last_applied() is
 /// the highest log offset durably indexed and callers resume indexing from
-/// the next offset.
+/// the next offset. Note that last_applied() is a log offset, not a Kafka
+/// offset: it drives rescan/rebuild, which operate in log-offset space.
 class kv_index {
 public:
     struct options {
@@ -47,9 +49,10 @@ public:
 
     static ss::future<std::unique_ptr<kv_index>> open(options);
 
-    ss::future<> index_batch(const model::record_batch&);
+    ss::future<>
+    index_batch(const model::record_batch&, const offset_translator_state&);
 
-    ss::future<std::optional<model::offset>> lookup(bytes_view key);
+    ss::future<std::optional<kafka::offset>> lookup(bytes_view key);
 
     model::offset last_applied() const;
 

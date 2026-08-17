@@ -78,7 +78,7 @@ TEST_F(kv_index_log_fixture, log_with_override_indexes_appends) {
     auto looked_up
       = b.get_log()->get_kv_index()->lookup(to_bytes_view("k")).get();
     ASSERT_TRUE(looked_up.has_value());
-    EXPECT_EQ(*looked_up, model::offset(1));
+    EXPECT_EQ(*looked_up, kafka::offset(1));
 
     b.stop().get();
 }
@@ -129,7 +129,7 @@ TEST_F(kv_index_log_fixture, reopen_resumes_from_last_applied) {
     auto looked_up
       = b.get_log()->get_kv_index()->lookup(to_bytes_view("k")).get();
     ASSERT_TRUE(looked_up.has_value());
-    EXPECT_EQ(*looked_up, model::offset(0));
+    EXPECT_EQ(*looked_up, kafka::offset(0));
 
     b.stop().get();
 }

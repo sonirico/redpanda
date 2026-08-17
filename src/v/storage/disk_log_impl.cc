@@ -274,12 +274,13 @@ ss::future<> disk_log_impl::remove() {
 namespace {
 struct kv_index_rescan_consumer {
     ss::future<ss::stop_iteration> operator()(model::record_batch b) {
-        co_await _idx.index_batch(b);
+        co_await _idx.index_batch(b, _ot);
         co_return ss::stop_iteration::no;
     }
     void end_of_stream() {}
 
     kv_index& _idx;
+    const offset_translator_state& _ot;
 };
 } // namespace
 
@@ -305,7 +306,8 @@ ss::future<> disk_log_impl::open_kv_index(ss::abort_source& as) {
         auto rdr = co_await make_reader(
           local_log_reader_config(start, lstats.dirty_offset, as));
         co_await rdr.consume(
-          kv_index_rescan_consumer{*_kv_index}, model::no_timeout);
+          kv_index_rescan_consumer{*_kv_index, *get_offset_translator_state()},
+          model::no_timeout);
     }
     co_await _kv_index->flush();
     vlog(
@@ -343,7 +345,7 @@ ss::future<> disk_log_impl::close_kv_index(bool remove_files) {
 
 ss::future<> disk_log_impl::kv_index_batch(const model::record_batch& b) {
     if (_kv_index) {
-        co_await _kv_index->index_batch(b);
+        co_await _kv_index->index_batch(b, *get_offset_translator_state());
     }
 }
 

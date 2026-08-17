@@ -45,7 +45,8 @@ ss::future<std::unique_ptr<kv_index>> kv_index::open(options o) {
       new kv_index(std::move(db), last_applied));
 }
 
-ss::future<> kv_index::index_batch(const model::record_batch& b) {
+ss::future<> kv_index::index_batch(
+  const model::record_batch& b, const offset_translator_state& ot) {
     auto holder = _gate.hold();
     if (
       b.header().type != model::record_batch_type::raft_data
@@ -75,7 +76,8 @@ ss::future<> kv_index::index_batch(const model::record_batch& b) {
             wb.remove(sv, lsm::sequence_number(o()));
         } else {
             iobuf v;
-            auto be = ss::cpu_to_be(static_cast<uint64_t>(o()));
+            auto be = ss::cpu_to_be(
+              static_cast<uint64_t>(ot.from_log_offset(o)()));
             v.append(reinterpret_cast<const char*>(&be), 8);
             wb.put(sv, std::move(v), lsm::sequence_number(o()));
         }
@@ -88,7 +90,7 @@ ss::future<> kv_index::index_batch(const model::record_batch& b) {
     }
 }
 
-ss::future<std::optional<model::offset>> kv_index::lookup(bytes_view key) {
+ss::future<std::optional<kafka::offset>> kv_index::lookup(bytes_view key) {
     auto holder = _gate.hold();
     auto v = co_await _db.get(
       std::string_view(reinterpret_cast<const char*>(key.data()), key.size()));
@@ -97,7 +99,7 @@ ss::future<std::optional<model::offset>> kv_index::lookup(bytes_view key) {
     }
     iobuf_const_parser parser(*v);
     auto x = parser.consume_be_type<uint64_t>();
-    co_return model::offset(static_cast<int64_t>(x));
+    co_return kafka::offset(static_cast<int64_t>(x));
 }
 
 model::offset kv_index::last_applied() const { return _last_applied; }

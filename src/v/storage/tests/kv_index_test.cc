@@ -13,9 +13,11 @@
 #include "bytes/iobuf.h"
 #include "model/compression.h"
 #include "model/fundamental.h"
+#include "model/namespace.h"
 #include "model/record.h"
 #include "model/record_batch_types.h"
 #include "storage/kv_index.h"
+#include "storage/offset_translator_state.h"
 #include "storage/record_batch_builder.h"
 #include "test_utils/test.h"
 #include "test_utils/tmp_dir.h"
@@ -66,18 +68,22 @@ public:
         return kv_index::options{.dir = _tmp_dir.get_path()};
     }
 
+    const offset_translator_state& translator() const { return _ot; }
+
 private:
     temporary_dir _tmp_dir{"kv_index_test"};
+    offset_translator_state _ot{model::ntp(
+      model::kafka_namespace, model::topic("t"), model::partition_id(0))};
 };
 
 TEST_F_CORO(kv_index_fixture, put_and_lookup) {
     auto idx = co_await kv_index::open(make_options());
     auto batch = make_batch(model::offset(0), {{"k", "v1"}});
-    co_await idx->index_batch(batch);
+    co_await idx->index_batch(batch, translator());
 
     auto looked_up = co_await idx->lookup(to_bytes_view("k"));
     ASSERT_TRUE(looked_up.has_value());
-    EXPECT_EQ(*looked_up, model::offset(0));
+    EXPECT_EQ(*looked_up, kafka::offset(0));
     EXPECT_EQ(idx->last_applied(), model::offset(0));
 
     co_await idx->close();
@@ -87,12 +93,12 @@ TEST_F_CORO(kv_index_fixture, latest_wins) {
     auto idx = co_await kv_index::open(make_options());
     auto batch0 = make_batch(model::offset(0), {{"k", "v1"}});
     auto batch1 = make_batch(model::offset(1), {{"k", "v2"}});
-    co_await idx->index_batch(batch0);
-    co_await idx->index_batch(batch1);
+    co_await idx->index_batch(batch0, translator());
+    co_await idx->index_batch(batch1, translator());
 
     auto looked_up = co_await idx->lookup(to_bytes_view("k"));
     ASSERT_TRUE(looked_up.has_value());
-    EXPECT_EQ(*looked_up, model::offset(1));
+    EXPECT_EQ(*looked_up, kafka::offset(1));
 
     co_await idx->close();
 }
@@ -101,8 +107,8 @@ TEST_F_CORO(kv_index_fixture, tombstone_removes) {
     auto idx = co_await kv_index::open(make_options());
     auto batch0 = make_batch(model::offset(0), {{"k", "v1"}});
     auto batch1 = make_batch(model::offset(1), {{"k", std::nullopt}});
-    co_await idx->index_batch(batch0);
-    co_await idx->index_batch(batch1);
+    co_await idx->index_batch(batch0, translator());
+    co_await idx->index_batch(batch1, translator());
 
     auto looked_up = co_await idx->lookup(to_bytes_view("k"));
     EXPECT_FALSE(looked_up.has_value());
@@ -117,11 +123,11 @@ TEST_F_CORO(kv_index_fixture, null_key_skipped) {
     builder.add_raw_kv(std::nullopt, to_iobuf("unkeyed"));
     builder.add_raw_kv(to_iobuf("k"), to_iobuf("v"));
     auto batch = std::move(builder).build();
-    co_await idx->index_batch(batch);
+    co_await idx->index_batch(batch, translator());
 
     auto looked_up = co_await idx->lookup(to_bytes_view("k"));
     ASSERT_TRUE(looked_up.has_value());
-    EXPECT_EQ(*looked_up, model::offset(11));
+    EXPECT_EQ(*looked_up, kafka::offset(11));
     EXPECT_EQ(idx->last_applied(), model::offset(11));
 
     co_await idx->close();
@@ -130,15 +136,15 @@ TEST_F_CORO(kv_index_fixture, null_key_skipped) {
 TEST_F_CORO(kv_index_fixture, redelivery_ignored) {
     auto idx = co_await kv_index::open(make_options());
     auto batch = make_batch(model::offset(0), {{"k", "v1"}});
-    co_await idx->index_batch(batch);
+    co_await idx->index_batch(batch, translator());
     auto last_applied_after_first = idx->last_applied();
 
-    co_await idx->index_batch(batch);
+    co_await idx->index_batch(batch, translator());
     EXPECT_EQ(idx->last_applied(), last_applied_after_first);
 
     auto looked_up = co_await idx->lookup(to_bytes_view("k"));
     ASSERT_TRUE(looked_up.has_value());
-    EXPECT_EQ(*looked_up, model::offset(0));
+    EXPECT_EQ(*looked_up, kafka::offset(0));
 
     co_await idx->close();
 }
@@ -147,7 +153,7 @@ TEST_F_CORO(kv_index_fixture, reopen_keeps_last_applied) {
     auto opts = make_options();
     auto idx = co_await kv_index::open(opts);
     auto batch = make_batch(model::offset(0), {{"k", "v1"}});
-    co_await idx->index_batch(batch);
+    co_await idx->index_batch(batch, translator());
     co_await idx->flush();
     co_await idx->close();
 
@@ -156,7 +162,7 @@ TEST_F_CORO(kv_index_fixture, reopen_keeps_last_applied) {
 
     auto looked_up = co_await reopened->lookup(to_bytes_view("k"));
     ASSERT_TRUE(looked_up.has_value());
-    EXPECT_EQ(*looked_up, model::offset(0));
+    EXPECT_EQ(*looked_up, kafka::offset(0));
 
     co_await reopened->close();
 }
@@ -166,11 +172,28 @@ TEST_F_CORO(kv_index_fixture, compressed_batch_indexed) {
     auto batch = make_batch(
       model::offset(0), {{"k", "v1"}}, model::compression::zstd);
     ASSERT_TRUE(batch.compressed());
-    co_await idx->index_batch(batch);
+    co_await idx->index_batch(batch, translator());
 
     auto looked_up = co_await idx->lookup(to_bytes_view("k"));
     ASSERT_TRUE(looked_up.has_value());
-    EXPECT_EQ(*looked_up, model::offset(0));
+    EXPECT_EQ(*looked_up, kafka::offset(0));
+
+    co_await idx->close();
+}
+
+TEST_F_CORO(kv_index_fixture, stores_kafka_offset) {
+    auto idx = co_await kv_index::open(make_options());
+    offset_translator_state ot(
+      model::ntp(
+        model::kafka_namespace, model::topic("t"), model::partition_id(0)),
+      model::offset(0),
+      1);
+    auto batch = make_batch(model::offset(1), {{"k", "v1"}});
+    co_await idx->index_batch(batch, ot);
+
+    auto looked_up = co_await idx->lookup(to_bytes_view("k"));
+    ASSERT_TRUE(looked_up.has_value());
+    EXPECT_EQ(*looked_up, kafka::offset(0));
 
     co_await idx->close();
 }
