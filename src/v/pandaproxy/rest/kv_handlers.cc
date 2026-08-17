@@ -32,7 +32,6 @@
 #include "security/request_auth.h"
 #include "storage/kv_index.h"
 #include "storage/log.h"
-#include "storage/offset_translator_state.h"
 #include "storage/translating_reader.h"
 
 namespace pandaproxy::rest {
@@ -127,8 +126,7 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
                   co_return kv_lookup_result{
                     kv_lookup_result::status::not_found};
               }
-              auto koff = model::offset_cast(
-                p->get_offset_translator_state()->from_log_offset(*off));
+              auto koff = *off;
               auto proxy = kafka::make_partition_proxy(p);
               auto rdr = co_await proxy.make_reader(
                 kafka::log_reader_config(koff, koff, std::nullopt));
