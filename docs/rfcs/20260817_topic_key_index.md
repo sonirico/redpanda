@@ -12,28 +12,30 @@ Status: proof of concept, not yet compiled against a full toolchain; branch: htt
 
 ## What is being proposed
 
-A per-partition secondary index, `storage::kv_index`, that maps a record's
-raw key to the log offset of the latest record carrying that key, for
-topics that opt in via the `redpanda.kv.index.enabled` topic property, and
-a read-through lookup endpoint, `GET /kv/{topic}/{key}`, exposed on
-Pandaproxy.
+A per-partition secondary index, `storage::kv_index`, that maps a
+record's raw key to the Kafka offset of the latest record carrying that
+key (values are never copied; a lookup reads the record back from the
+log), for topics that opt in via the `redpanda.kv.index.enabled` topic
+property, and a read-through lookup endpoint, `GET /kv/{topic}/{key}`,
+exposed on Pandaproxy.
 
 ## Why (short reason)
 
-Looking up the latest value for a key currently requires either scanning a
-compacted topic or running a fetch-path sidecar outside the broker. Both
-add latency and, in the sidecar case, cannot serve keys whose local
-segments were evicted to tiered storage.
+Looking up the latest value for a key currently requires either scanning
+a compacted topic or running a fetch-path sidecar outside the broker.
+Both pay a full scan to locate the key, and a scan that reaches segments
+evicted to tiered storage is paid against the object store.
 
 ## How (short plan)
 
 Maintain an lsm-backed key-to-offset index from the append path of
-locally compacted topics, on every replica, at
-`<ntp dir>/kv_index/`. Serve lookups in-process on Pandaproxy by
-resolving the partition, reading the index on the owning shard, and
-reading the record back through `kafka::partition_proxy::make_reader`,
-which also covers records whose local segments were evicted by tiered
-storage.
+locally compacted topics, on every replica, at `<ntp dir>/kv_index/`.
+Serve lookups in-process on Pandaproxy by resolving the partition,
+reading the index on the owning shard, and reading the record back
+through `kafka::partition_proxy::make_reader`. Records whose local
+segments were evicted by tiered storage are served only when the
+operator opts in via the `kv_index_remote_read_enabled` cluster
+property; otherwise the lookup returns 404.
 
 ## Impact
 
@@ -41,9 +43,10 @@ Enables sub-millisecond, in-broker key lookups for locally compacted
 topics that opt in, without requiring an external sidecar or a full log
 scan. The index is optional per topic, gated behind a feature flag and a
 cluster property, and defaults to off. Every replica maintains its own
-copy, so read load can be served from whichever node hosts the queried
-partition; lookups against a non-hosting node return 421 rather than
-being forwarded.
+index, so read load can be served from whichever node hosts the queried
+partition, subject to that replica's index coverage and replication lag
+(see corner cases); lookups against a non-hosting node return 421 rather
+than being forwarded.
 
 # Motivation
 ## Why are we doing this?
@@ -52,9 +55,9 @@ The fetch-path sidecar `github.com/sonirico/rpkv` (contract suite and
 benchmarks: p50 11.07 ms / p99 16.85 ms loopback, 100k keys, see
 `docs/benchmarks/read-latency.md`) shows there is demand for key lookups
 and establishes the latency floor of any out-of-broker design. An
-out-of-broker sidecar also cannot serve keys whose local segments were
-evicted to tiered storage any better than a fetch against the broker
-itself, since it has no access to the remote read path.
+out-of-broker sidecar also has no way to locate a key without scanning,
+so a key that only exists in segments evicted to tiered storage costs a
+scan through the remote read path.
 
 ## What use cases does it support?
 
@@ -64,8 +67,8 @@ without scanning the log or running a separate lookup service.
 ## What is the expected outcome?
 
 Lower latency point lookups for compacted topics that opt in, served
-entirely in-broker, including for keys whose local segments have been
-evicted to tiered storage.
+entirely in-broker, with tiered-storage reads for evicted keys as an
+explicit operator opt-in.
 
 # Guide-level explanation
 ## How do we teach this?
@@ -91,8 +94,10 @@ from the key using the default murmur2 partitioner, matching the
 partition a producer using the same partitioner would have written to.
 The response is the raw record value with `X-Kv-Partition` and
 `X-Kv-Offset` headers on success (200), or 404 if the key is not found,
-is a tombstone, or the topic is not indexed. A request that lands on a
-broker that does not host the queried partition returns 421.
+is a tombstone, the topic is not indexed, or the record's local segment
+was evicted to tiered storage and `kv_index_remote_read_enabled` is
+false. A request that lands on a broker that does not host the queried
+partition returns 421.
 
 ## Introducing new named concepts.
 
@@ -100,6 +105,9 @@ broker that does not host the queried partition returns 421.
   default false, requests the key index for a compacting topic.
 - `kv_index_enabled`: cluster property, default false, cluster-wide
   switch gating the topic property.
+- `kv_index_remote_read_enabled`: cluster property, default false, allows a
+  lookup to read a record whose local segment was evicted to tiered
+  storage; when false such lookups return 404.
 - `kv_index`: feature flag gating the topic property.
 - `storage::kv_index`: the per-partition on-disk index implementation.
 
@@ -110,10 +118,14 @@ broker that does not host the queried partition returns 421.
 - Requires `cleanup.policy` to include `compact`; validated at topic
   creation and at alter-configs time by `kv_index_create_validator`
   (`src/v/kafka/server/handlers/topics/validators.h`).
-- Interacts with tiered storage: because lookups read the matching
-  record through `kafka::partition_proxy::make_reader`, a key whose
-  local segments have been evicted still resolves, through the remote
-  read path.
+- Interacts with tiered storage: a lookup whose Kafka offset is below
+  the local start offset would read through
+  `kafka::partition_proxy::make_reader` into the remote read path, which
+  is a cold random-access read against the object store (one remote
+  segment chunk fetched into the cloud storage cache per miss). That
+  read only happens when `kv_index_remote_read_enabled` is true, the
+  topic has `redpanda.remote.read` enabled and the offset is still
+  retained remotely; otherwise the lookup returns 404.
 - Property propagation follows the same plumbing as the existing
   `schema_registry_context`-style topic properties: create-topic,
   alter-configs, incremental-alter-configs, describe-configs,
@@ -135,8 +147,19 @@ None in the proof of concept. This is an unresolved question.
 - Compressed batches: batches are decompressed before indexing and
   again before the matching record is extracted on the read path.
 - Follower-served lookups: the index is maintained on all replicas, so
-  any replica can serve a lookup for a partition it hosts; a broker
-  that does not host the queried partition returns 421.
+  any replica can serve a lookup for a partition it hosts, but a
+  follower may answer with an older value than the leader, and a
+  replica's index only covers records that were in its local log when
+  the index was enabled plus records appended since; a replica created
+  by a partition move that recovered from a snapshot, or a topic that
+  enabled the index after local eviction, does not index the older keys.
+  A broker that does not host the queried partition returns 421.
+- Uncommitted records: the index is fed at append time, before raft
+  commit; a lookup whose offset is at or beyond the high watermark
+  returns 404 instead of exposing a record that may still be truncated.
+- Transactions: records from aborted transactions are indexed like any
+  other and are not filtered on the read path; this is listed under
+  unresolved questions.
 - Custom partitioners: since the endpoint's own partition resolution
   only knows the default murmur2 partitioner, callers that produced
   with a different partitioner must pass `?partition=N` explicitly.
@@ -147,7 +170,8 @@ None in the proof of concept. This is an unresolved question.
   index backed by one `lsm::database` per partition, stored under
   `<ntp dir>/kv_index/`. `options` control `dir`, `write_buffer_size`
   (default 1 MiB), `block_cache_size` (default 1 MiB), and
-  `max_open_files` (default 64). There is no WAL; `last_applied()`
+  `max_open_files` (default 64). There is no WAL; the stored value is
+  the record's Kafka offset, translated at index time; `last_applied()`
   reports the highest durably indexed log offset so that opening the
   index resumes indexing from `last_applied()+1`.
 - `disk_log_impl` (`src/v/storage/disk_log_impl.cc`): opens the index
@@ -163,9 +187,10 @@ None in the proof of concept. This is an unresolved question.
   `GET /kv/{topic}/{key}` resolves the partition (murmur2 of the key
   when `partition` is not given), locates the owning shard via
   `shard_table` and `partition_manager`, looks the key up in that
-  partition's `storage::kv_index` on the owning shard, translates the
-  found log offset to a Kafka offset via the offset translator, and
-  reads the record through `kafka::partition_proxy::make_reader`.
+  partition's `storage::kv_index` on the owning shard, rejects offsets
+  at or beyond the high watermark, rejects offsets below the local
+  start unless `kv_index_remote_read_enabled` is set, and reads the
+  record through `kafka::partition_proxy::make_reader`.
 
 ## Detailed design - How it works
 
@@ -184,11 +209,12 @@ longer exist. Removing the partition removes the index directory.
 On the read path, Pandaproxy resolves the partition for the requested
 key, dispatches to the shard that hosts it, and performs the index
 lookup and the subsequent record read on that shard in-process, without
-a network hop to another broker. The offset stored in the index is a
-log offset; it is translated to a Kafka offset with the partition's
-offset translator before being handed to `kafka::partition_proxy`,
-which is also what allows the read to transparently fall through to the
-remote read path for segments evicted by tiered storage.
+a network hop to another broker. The offset stored in the index is
+already a Kafka offset, translated when the batch was indexed, so it can
+be handed to `kafka::partition_proxy` even after the local offset
+translator was prefix-truncated by tiered storage eviction. Whether the
+read may fall through to the remote read path is decided by the
+`kv_index_remote_read_enabled` gate described above.
 
 ## Drawbacks
 
@@ -204,10 +230,12 @@ remote read path for segments evicted by tiered storage.
 ## Rationale and Alternatives
 
 - Why is this design the best in the space of possible designs?
-  It reuses the existing storage and Pandaproxy layers, keeps the index
-  local to the partition it describes (so it moves with the partition
-  on reassignment without extra replication logic), and piggybacks on
-  the existing tiered-storage read path instead of duplicating it.
+  It reuses the existing storage and Pandaproxy layers, stores offsets
+  only (so the log remains the single source of truth and the index size
+  is bounded by the live key set, not by value size), keeps the index
+  local to the partition it describes (so it moves with the partition on
+  reassignment without extra replication logic), and piggybacks on the
+  existing tiered-storage read path instead of duplicating it.
 - What other designs have been considered?
   An admin API v2 ConnectRPC service, a Kafka protocol extension, and
   an external sidecar (the existing `github.com/sonirico/rpkv`) were
@@ -230,3 +258,5 @@ remote read path for segments evicted by tiered storage.
   is in the proof of concept.
 - Exposing the index lookup over the Kafka protocol instead of, or in
   addition to, the Pandaproxy REST endpoint.
+- Whether the lookup path should filter records from aborted transactions
+  as the fetch path does.
