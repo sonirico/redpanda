@@ -7,6 +7,7 @@ redpanda_cc_library(
         "configuration.cc",
         "handlers.cc",
         "iceberg_handlers.cc",
+        "kv_handlers.cc",
         "proxy.cc",
     ],
     hdrs = [
@@ -15,6 +16,7 @@ redpanda_cc_library(
         "fwd.h",
         "handlers.h",
         "iceberg_handlers.h",
+        "kv_handlers.h",
         "proxy.h",
     ],
     implementation_deps = [
@@ -32,6 +34,7 @@ redpanda_cc_library(
     deps = [
         "//proto/redpanda/core/rest:iceberg_redpanda_proto",
         "//src/v/base",
+        "//src/v/bytes",
         "//src/v/bytes:iostream",
         "//src/v/cluster",
         "//src/v/cluster:client_quota_backend",
@@ -50,6 +53,8 @@ redpanda_cc_library(
         "//src/v/kafka/client:config_utils",
         "//src/v/kafka/client:configuration",
         "//src/v/kafka/client:exceptions",
+        "//src/v/kafka/client:partitioners",
+        "//src/v/kafka/data:partition_proxy",
         "//src/v/kafka/protocol:fetch",
         "//src/v/kafka/protocol/schemata:offset_commit_request",
         "//src/v/model",
@@ -65,6 +70,7 @@ redpanda_cc_library(
         "//src/v/security",
         "//src/v/security:request_auth",
         "//src/v/ssx:sformat",
+        "//src/v/storage",
         "//src/v/utils:adjustable_semaphore",
         "//src/v/utils:log_hist",
         "@abseil-cpp//absl/container:flat_hash_map",
