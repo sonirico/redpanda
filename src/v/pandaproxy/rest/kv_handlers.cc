@@ -11,9 +11,11 @@
 
 #include "bytes/bytes.h"
 #include "cluster/partition.h"
+#include "cluster/partition_kafka_offsets.h"
 #include "cluster/partition_manager.h"
 #include "cluster/shard_table.h"
 #include "cluster/topic_table.h"
+#include "config/configuration.h"
 #include "config/rest_authn_endpoint.h"
 #include "kafka/client/partitioners.h"
 #include "kafka/client/types.h"
@@ -39,7 +41,13 @@ namespace pandaproxy::rest {
 namespace {
 
 struct kv_lookup_result {
-    enum class status { ok, not_hosted, not_indexed, not_found } status;
+    enum class status {
+        ok,
+        not_hosted,
+        not_indexed,
+        not_found,
+        not_local
+    } status;
     iobuf value;
     model::partition_id partition;
     kafka::offset offset;
@@ -127,6 +135,19 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
                     kv_lookup_result::status::not_found};
               }
               auto koff = *off;
+              if (
+                koff >= model::offset_cast(cluster::kafka_high_watermark(*p))) {
+                  co_return kv_lookup_result{
+                    kv_lookup_result::status::not_found};
+              }
+              auto local_start = model::offset_cast(
+                p->log()->from_log_offset(p->raft_start_offset()));
+              if (
+                koff < local_start
+                && !config::shard_local_cfg().kv_index_remote_read_enabled()) {
+                  co_return kv_lookup_result{
+                    kv_lookup_result::status::not_local};
+              }
               auto proxy = kafka::make_partition_proxy(p);
               auto rdr = co_await proxy.make_reader(
                 kafka::log_reader_config(koff, koff, std::nullopt));
@@ -190,6 +211,11 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
         break;
     case kv_lookup_result::status::not_found:
         rp.rep->set_status(ss::http::reply::status_type::not_found);
+        break;
+    case kv_lookup_result::status::not_local:
+        rp.rep->set_status(
+          ss::http::reply::status_type::not_found,
+          R"({"error":"record only available in tiered storage"})");
         break;
     }
 
