@@ -211,6 +211,12 @@ class DescribeTopicsTest(RedpandaTest):
                 "records in this topic (e.g. by the in-broker Iceberg translator). "
                 "Defaults to the Schema Registry default context ('.').",
             ),
+            "redpanda.kv.index.enabled": ConfigProperty(
+                config_type="BOOLEAN",
+                value="false",
+                doc_string="If true, the broker maintains a key index for this compacted topic, "
+                "served by the Pandaproxy GET /kv/{topic}/{key} endpoint.",
+            ),
             "initial.retention.local.target.bytes": ConfigProperty(
                 config_type="LONG",
                 value="-1",

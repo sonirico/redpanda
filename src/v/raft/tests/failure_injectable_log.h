@@ -119,6 +119,8 @@ public:
     void set_overrides(storage::ntp_config::default_overrides) final;
 
     bool notify_compaction_update() final;
+    ss::future<bool> notify_kv_index_update() final;
+    storage::kv_index* get_kv_index() final;
 
     int64_t compaction_backlog() final;
 

@@ -176,6 +176,11 @@ def read_topic_properties_serde(rdr: Reader, version):
             "schema_registry_context": rdr.read_optional(Reader.read_string),
         }
 
+    if version >= 15:
+        topic_properties |= {
+            "kv_index_enabled": rdr.read_optional(Reader.read_bool),
+        }
+
     return topic_properties
 
 
@@ -199,7 +204,7 @@ def read_topic_config(rdr: Reader, version):
         "topic": rdr.read_string(),
         "partitions": rdr.read_int32(),
         "replication_factor": rdr.read_int16(),
-        "properties": rdr.read_envelope(read_topic_properties_serde, reader_version=14),
+        "properties": rdr.read_envelope(read_topic_properties_serde, reader_version=15),
     }
     if version < 1:
         # see https://github.com/redpanda-data/redpanda/pull/6613
@@ -408,10 +413,16 @@ def read_incremental_topic_update_serde(rdr: Reader):
                     rdr, lambda r: r.read_optional(Reader.read_string)
                 ),
             }
+        if version >= 12:
+            incr_obj |= {
+                "kv_index_enabled": read_property_update_serde(
+                    rdr, lambda r: r.read_optional(Reader.read_bool)
+                ),
+            }
 
         return incr_obj
 
-    return rdr.read_envelope(incr_topic_upd, reader_version=11)
+    return rdr.read_envelope(incr_topic_upd, reader_version=12)
 
 
 def read_create_partitions_serde(rdr: Reader):

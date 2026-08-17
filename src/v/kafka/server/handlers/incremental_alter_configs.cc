@@ -20,6 +20,7 @@
 #include "kafka/server/handlers/configs/storage_mode_properties.h"
 #include "kafka/server/handlers/details/alter_config_utils.h"
 #include "kafka/server/handlers/topics/types.h"
+#include "kafka/server/handlers/topics/validators.h"
 #include "kafka/server/request_context.h"
 #include "kafka/server/response.h"
 #include "model/fundamental.h"
@@ -462,6 +463,22 @@ create_topic_properties_update(
                   [](const ss::sstring& s) {
                       return pandaproxy::schema_registry::context{s};
                   });
+                continue;
+            }
+            if (cfg.name == topic_property_kv_index_enabled) {
+                parse_and_set_optional_bool_alpha(
+                  update.properties.kv_index_enabled, cfg.value, op);
+                if (
+                  update.properties.kv_index_enabled.value.value_or(false)
+                  && (!ctx.feature_table().local().is_active(
+                        features::feature::kv_index)
+                      || !config::shard_local_cfg().kv_index_enabled())) {
+                    return make_error_alter_config_resource_response<
+                      resp_resource_t>(
+                      resource,
+                      error_code::invalid_config,
+                      kv_index_create_validator::error_message);
+                }
                 continue;
             }
 

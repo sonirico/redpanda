@@ -18,6 +18,7 @@
 #include "pandaproxy/rest/configuration.h"
 #include "pandaproxy/rest/handlers.h"
 #include "pandaproxy/rest/iceberg_handlers.h"
+#include "pandaproxy/rest/kv_handlers.h"
 #include "resource_mgmt/cpu_scheduling.h"
 #include "security/authorizer.h"
 
@@ -110,6 +111,9 @@ server::routes_t get_proxy_routes(ss::gate& gate, one_shot& es) {
         ss::httpd::rest_json::get_translation_state,
         wrap(gate, es, get_translation_state)});
 
+    routes.routes.emplace_back(
+      server::route_t{ss::httpd::rest_json::get_kv, wrap(gate, es, get_kv)});
+
     return routes;
 }
 
@@ -171,6 +175,14 @@ const configuration& proxy::config() const { return _config; }
 
 security::authorizer& proxy::authorizer() {
     return _controller->get_authorizer().local();
+}
+
+ss::sharded<cluster::partition_manager>& proxy::partition_manager() {
+    return _controller->get_partition_manager();
+}
+
+cluster::shard_table& proxy::shard_table() {
+    return _controller->get_shard_table().local();
 }
 
 ss::future<> proxy::do_start() {

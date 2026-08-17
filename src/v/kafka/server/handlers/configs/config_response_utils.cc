@@ -1108,6 +1108,20 @@ config_response_container_t make_topic_configs(
     add_topic_config_if_requested(
       config_keys,
       result,
+      config::shard_local_cfg().kv_index_enabled.name(),
+      config::shard_local_cfg().kv_index_enabled(),
+      topic_property_kv_index_enabled,
+      topic_properties.kv_index_enabled,
+      include_synonyms,
+      maybe_make_documentation(
+        include_documentation,
+        "If true, the broker maintains a key index for this compacted topic, "
+        "served by the Pandaproxy GET /kv/{topic}/{key} endpoint."),
+      &describe_as_string<bool>);
+
+    add_topic_config_if_requested(
+      config_keys,
+      result,
       topic_property_min_cleanable_dirty_ratio,
       metadata_cache.get_default_min_cleanable_dirty_ratio(),
       topic_property_min_cleanable_dirty_ratio,

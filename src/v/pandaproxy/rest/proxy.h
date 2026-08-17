@@ -53,6 +53,8 @@ public:
         return _dl_frontend;
     }
     security::authorizer& authorizer();
+    ss::sharded<cluster::partition_manager>& partition_manager();
+    cluster::shard_table& shard_table();
     cluster::topic_table& topic_table() { return _topic_table.local(); }
     ss::future<> mitigate_error(std::exception_ptr);
 

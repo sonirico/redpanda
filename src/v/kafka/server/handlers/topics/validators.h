@@ -641,6 +641,40 @@ struct storage_mode_config_validator {
     }
 };
 
+struct kv_index_create_validator {
+    static constexpr error_code ec = error_code::invalid_config;
+    static constexpr const char* error_message
+      = "redpanda.kv.index.enabled requires the kv_index feature, the "
+        "kv_index_enabled cluster property and a compacting cleanup.policy";
+
+    static bool
+    is_valid(const creatable_topic& c, features::feature_table* ft) {
+        auto config_entries = config_map(c.configs);
+        if (!get_bool_value(config_entries, topic_property_kv_index_enabled)
+               .value_or(false)) {
+            return true;
+        }
+        if (
+          ft == nullptr || !ft->is_active(features::feature::kv_index)
+          || !config::shard_local_cfg().kv_index_enabled()) {
+            return false;
+        }
+        auto end = config_entries.end();
+        auto iter = config_entries.find(topic_property_cleanup_policy);
+        if (end == iter) {
+            return false;
+        }
+        try {
+            auto cleanup_policy
+              = boost::lexical_cast<model::cleanup_policy_bitflags>(
+                iter->second);
+            return model::is_compaction_enabled(cleanup_policy);
+        } catch (...) {
+            return false;
+        }
+    }
+};
+
 using compression_type_validator
   = configuration_value_validator<compression_type_validator_details>;
 using compaction_strategy_validator

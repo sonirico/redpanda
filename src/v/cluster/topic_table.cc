@@ -1235,6 +1235,8 @@ topic_properties topic_table::update_topic_properties(
     incremental_update(
       updated_properties.schema_registry_context,
       overrides.schema_registry_context);
+    incremental_update(
+      updated_properties.kv_index_enabled, overrides.kv_index_enabled);
     return updated_properties;
 }
 
