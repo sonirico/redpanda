@@ -4663,6 +4663,14 @@ configuration::configuration(ctor_key)
       "maintained and the key lookup endpoint returns 404 for every topic.",
       {.needs_restart = needs_restart::no, .visibility = visibility::user},
       false)
+  , kv_index_remote_read_enabled(
+      *this,
+      "kv_index_remote_read_enabled",
+      "Allow the key lookup endpoint to read records whose local segments "
+      "were evicted to tiered storage. When false, such lookups return 404 "
+      "instead of fetching from the object store.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::user},
+      false)
   , iceberg_default_partition_spec(
       *this,
       "iceberg_default_partition_spec",

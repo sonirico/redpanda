@@ -118,8 +118,7 @@ class KvIndexTieredTest(RedpandaTest):
             backoff_sec=1,
         )
 
-    @cluster(num_nodes=3)
-    def test_lookup_after_local_eviction(self):
+    def _produce_until_evicted(self) -> str:
         rpk = RpkTool(self.redpanda)
         rpk.create_topic(
             TOPIC,
@@ -151,6 +150,23 @@ class KvIndexTieredTest(RedpandaTest):
             return True
 
         wait_until(local_data_evicted, timeout_sec=180, backoff_sec=2)
+
+        return value
+
+    @cluster(num_nodes=3)
+    def test_evicted_key_is_404_by_default(self):
+        value = self._produce_until_evicted()
+
+        self._wait_lookup(
+            TOPIC, "k1", 404, b'{"error":"record only available in tiered storage"}'
+        )
+        self._wait_lookup(TOPIC, "k19999", 200, value.encode())
+
+    @cluster(num_nodes=3)
+    def test_evicted_key_reads_through_when_enabled(self):
+        value = self._produce_until_evicted()
+
+        self.redpanda.set_cluster_config({"kv_index_remote_read_enabled": True})
 
         self._wait_lookup(TOPIC, "k1", 200, value.encode())
         self._wait_lookup(TOPIC, "k19999", 200, value.encode())
