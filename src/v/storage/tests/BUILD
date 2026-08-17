@@ -188,6 +188,25 @@ redpanda_cc_gtest(
 )
 
 redpanda_cc_gtest(
+    name = "kv_index_test",
+    timeout = "short",
+    srcs = [
+        "kv_index_test.cc",
+    ],
+    deps = [
+        "//src/v/base",
+        "//src/v/bytes:iobuf",
+        "//src/v/model",
+        "//src/v/model/tests:random",
+        "//src/v/storage",
+        "//src/v/test_utils:gtest",
+        "//src/v/test_utils:tmp_dir",
+        "@googletest//:gtest",
+        "@seastar",
+    ],
+)
+
+redpanda_cc_gtest(
     name = "log_segment_appender_test",
     timeout = "short",
     srcs = [
