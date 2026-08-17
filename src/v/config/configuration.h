@@ -775,6 +775,7 @@ struct configuration final : public config_store {
     property<std::optional<double>> iceberg_throttle_backlog_size_ratio;
 
     property<bool> iceberg_delete;
+    property<bool> kv_index_enabled;
     property<ss::sstring> iceberg_default_partition_spec;
     enum_property<model::iceberg_invalid_record_action>
       iceberg_invalid_record_action;
