@@ -111,6 +111,7 @@ disk_log_appender::operator()(model::record_batch& batch) {
             co_await initialize();
         }
         auto stop = co_await append_batch_to_segment(batch);
+        co_await _log.kv_index_batch(batch);
         _log.offset_translator().process(batch);
         co_return stop;
     } catch (...) {

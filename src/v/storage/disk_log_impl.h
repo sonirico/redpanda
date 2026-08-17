@@ -19,6 +19,7 @@
 #include "ssx/mutex.h"
 #include "storage/disk_log_appender.h"
 #include "storage/failure_probes.h"
+#include "storage/kv_index.h"
 #include "storage/lock_manager.h"
 #include "storage/log.h"
 #include "storage/offset_translator.h"
@@ -172,6 +173,8 @@ public:
     uint64_t size_bytes_after_offset(model::offset o) const override;
     void set_overrides(ntp_config::default_overrides) final;
     bool notify_compaction_update() final;
+    ss::future<bool> notify_kv_index_update() final;
+    kv_index* get_kv_index() final;
 
     int64_t compaction_backlog() final;
 
@@ -347,6 +350,13 @@ private:
     friend ::storage_e2e_fixture;
     friend ::reupload_fixture; // for tests
 
+    bool kv_index_wanted() const;
+    std::filesystem::path kv_index_dir() const;
+    ss::future<> open_kv_index(ss::abort_source&);
+    ss::future<> rebuild_kv_index(ss::abort_source&);
+    ss::future<> close_kv_index(bool remove_files);
+    ss::future<> kv_index_batch(const model::record_batch&);
+
     ss::future<model::record_batch_reader>
       make_unchecked_reader(local_log_reader_config);
 
@@ -507,6 +517,7 @@ private:
     std::optional<eviction_monitor> _eviction_monitor;
     size_t _max_segment_size;
     std::unique_ptr<readers_cache> _readers_cache;
+    std::unique_ptr<kv_index> _kv_index;
     // average ratio of segment sizes after segment size before compaction
     moving_average<double, 5> _compaction_ratio{1.0};
 

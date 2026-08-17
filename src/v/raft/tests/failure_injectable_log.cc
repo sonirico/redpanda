@@ -216,6 +216,14 @@ bool failure_injectable_log::notify_compaction_update() {
     return _underlying_log->notify_compaction_update();
 }
 
+ss::future<bool> failure_injectable_log::notify_kv_index_update() {
+    return _underlying_log->notify_kv_index_update();
+}
+
+storage::kv_index* failure_injectable_log::get_kv_index() {
+    return _underlying_log->get_kv_index();
+}
+
 int64_t failure_injectable_log::compaction_backlog() {
     return _underlying_log->compaction_backlog();
 }
