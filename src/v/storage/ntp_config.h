@@ -96,6 +96,9 @@ public:
         // Storage mode for the topic (local, tiered, or cloud)
         model::redpanda_storage_mode storage_mode{default_storage_mode};
 
+        // Per-topic key index (redpanda.kv.index.enabled).
+        std::optional<bool> kv_index_enabled;
+
         fmt::iterator format_to(fmt::iterator it) const;
     };
 
@@ -163,6 +166,12 @@ public:
             return false;
         }
         return model::is_compaction_enabled(cleanup_policy());
+    }
+
+    // If the topic requested the key index. The log additionally requires
+    // is_locally_compacted() and the kv_index_enabled cluster property.
+    bool kv_index_requested() const {
+        return has_overrides() && _overrides->kv_index_enabled.value_or(false);
     }
 
     // If compaction is enabled for remote storage.
