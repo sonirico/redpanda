@@ -34,6 +34,7 @@ namespace storage {
 
 class segment_set;
 class probe;
+class kv_index;
 
 class log {
 public:
@@ -229,6 +230,15 @@ public:
     /// Notifies the log about a possible change to the log compaction config.
     /// Returns true if the log compaction changed.
     virtual bool notify_compaction_update() = 0;
+
+    /// Notifies the log that redpanda.kv.index.enabled, the compaction
+    /// policy or the kv_index_enabled cluster property may have changed;
+    /// opens or closes (and removes) the key index accordingly.
+    /// Returns true if the index state changed.
+    virtual ss::future<bool> notify_kv_index_update() = 0;
+
+    /// The key index of this log, nullptr when not enabled.
+    virtual kv_index* get_kv_index() = 0;
 
     virtual int64_t compaction_backlog() = 0;
 

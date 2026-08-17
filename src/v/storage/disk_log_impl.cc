@@ -250,6 +250,7 @@ ss::future<> disk_log_impl::remove() {
     _closed = true;
     // wait for compaction to finish
     co_await _compaction_housekeeping_gate.close();
+    co_await close_kv_index(true);
 
     auto _ = ss::defer([this] { _probe->clear_metrics(); });
 
@@ -270,6 +271,98 @@ ss::future<> disk_log_impl::remove() {
     co_await remove_kvstore_state(config().ntp(), _kvstore);
 }
 
+namespace {
+struct kv_index_rescan_consumer {
+    ss::future<ss::stop_iteration> operator()(model::record_batch b) {
+        co_await _idx.index_batch(b);
+        co_return ss::stop_iteration::no;
+    }
+    void end_of_stream() {}
+
+    kv_index& _idx;
+};
+} // namespace
+
+bool disk_log_impl::kv_index_wanted() const {
+    return config().kv_index_requested() && config().is_locally_compacted()
+           && config::shard_local_cfg().kv_index_enabled();
+}
+
+std::filesystem::path disk_log_impl::kv_index_dir() const {
+    return std::filesystem::path(config().work_directory()) / "kv_index";
+}
+
+ss::future<> disk_log_impl::open_kv_index(ss::abort_source& as) {
+    _kv_index = co_await kv_index::open({.dir = kv_index_dir()});
+    auto lstats = offsets();
+    if (_kv_index->last_applied() > lstats.dirty_offset) {
+        co_await close_kv_index(true);
+        _kv_index = co_await kv_index::open({.dir = kv_index_dir()});
+    }
+    auto start = std::max(
+      lstats.start_offset, model::next_offset(_kv_index->last_applied()));
+    if (start <= lstats.dirty_offset) {
+        auto rdr = co_await make_reader(
+          local_log_reader_config(start, lstats.dirty_offset, as));
+        co_await rdr.consume(
+          kv_index_rescan_consumer{*_kv_index}, model::no_timeout);
+    }
+    co_await _kv_index->flush();
+    vlog(
+      stlog.info,
+      "kv index opened for {} at {}, last_applied {}",
+      config().ntp(),
+      kv_index_dir(),
+      _kv_index->last_applied());
+}
+
+ss::future<> disk_log_impl::rebuild_kv_index(ss::abort_source& as) {
+    co_await close_kv_index(true);
+    co_await open_kv_index(as);
+}
+
+ss::future<> disk_log_impl::close_kv_index(bool remove_files) {
+    if (!_kv_index) {
+        co_return;
+    }
+    try {
+        co_await _kv_index->flush();
+    } catch (...) {
+        vlog(
+          stlog.warn,
+          "kv index flush failed for {}: {}",
+          config().ntp(),
+          std::current_exception());
+    }
+    co_await _kv_index->close();
+    _kv_index.reset();
+    if (remove_files) {
+        co_await kv_index::remove(kv_index_dir());
+    }
+}
+
+ss::future<> disk_log_impl::kv_index_batch(const model::record_batch& b) {
+    if (_kv_index) {
+        co_await _kv_index->index_batch(b);
+    }
+}
+
+ss::future<bool> disk_log_impl::notify_kv_index_update() {
+    bool wanted = kv_index_wanted();
+    bool have = _kv_index != nullptr;
+    if (wanted == have) {
+        co_return false;
+    }
+    if (wanted) {
+        co_await open_kv_index(_compaction_as);
+    } else {
+        co_await close_kv_index(true);
+    }
+    co_return true;
+}
+
+kv_index* disk_log_impl::get_kv_index() { return _kv_index.get(); }
+
 ss::future<> disk_log_impl::start(
   std::optional<truncate_prefix_config> truncate_cfg, ss::abort_source& as) {
     auto is_new = is_new_log();
@@ -282,6 +375,9 @@ ss::future<> disk_log_impl::start(
     // a brand new log.
     if (!is_new) {
         co_await offset_translator().sync_with_log(*this, as);
+    }
+    if (kv_index_wanted()) {
+        co_await open_kv_index(as);
     }
 }
 
@@ -315,6 +411,7 @@ ss::future<std::optional<ss::sstring>> disk_log_impl::close() {
     // wait for compaction to finish
     vlog(stlog.trace, "waiting for {} compaction to finish", config().ntp());
     co_await _compaction_housekeeping_gate.close();
+    co_await close_kv_index(false);
 
     vlog(stlog.trace, "stopping {} readers cache", config().ntp());
 
@@ -3581,6 +3678,9 @@ ss::future<> disk_log_impl::truncate(truncate_config cfg) {
           });
     });
     co_await _offset_translator.truncate(cfg.base_offset);
+    if (_kv_index && _kv_index->last_applied() >= cfg.base_offset) {
+        co_await rebuild_kv_index(_compaction_as);
+    }
 }
 
 ss::future<> disk_log_impl::do_truncate(
