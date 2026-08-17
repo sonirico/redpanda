@@ -306,6 +306,13 @@ bool maybe_append_update(
         return update.properties.schema_registry_context.value
                != topic_config.properties.schema_registry_context;
     }
+    if (config_name == kafka::topic_property_kv_index_enabled) {
+        return parse_and_set(
+          topic_config.tp_ns,
+          update.properties.kv_index_enabled,
+          config_value,
+          topic_config.properties.kv_index_enabled);
+    }
 
     if (config_name == kafka::topic_property_min_cleanable_dirty_ratio) {
         return parse_and_set(

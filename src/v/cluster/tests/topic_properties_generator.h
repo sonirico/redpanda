@@ -87,5 +87,8 @@ inline cluster::topic_properties random_topic_properties() {
             "." + random_generators::gen_alphanum_string(8)};
     }
 
+    properties.kv_index_enabled = tests::random_optional(
+      [] { return tests::random_bool(); });
+
     return properties;
 }

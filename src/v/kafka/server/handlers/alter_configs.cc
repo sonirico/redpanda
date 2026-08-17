@@ -22,6 +22,7 @@
 #include "kafka/server/handlers/configs/storage_mode_properties.h"
 #include "kafka/server/handlers/details/alter_config_utils.h"
 #include "kafka/server/handlers/topics/types.h"
+#include "kafka/server/handlers/topics/validators.h"
 #include "kafka/server/request_context.h"
 #include "kafka/server/response.h"
 #include "model/fundamental.h"
@@ -99,7 +100,7 @@ create_topic_properties_update(
     std::apply(apply_op(op_t::none), update.custom_properties.serde_fields());
 
     static_assert(
-      std::tuple_size_v<decltype(update.properties.serde_fields())> == 45,
+      std::tuple_size_v<decltype(update.properties.serde_fields())> == 46,
       "If you add a property, decide on its default alter config "
       "policy, and handle the update in the loop below");
     static_assert(
@@ -144,6 +145,7 @@ create_topic_properties_update(
 
     update.properties.storage_mode.op = op_t::none;
     update.properties.schema_registry_context.op = op_t::none;
+    update.properties.kv_index_enabled.op = op_t::none;
 
     // Now that the defaults are set, continue to set properties from the
     // request
@@ -483,6 +485,24 @@ create_topic_properties_update(
                   [](const ss::sstring& s) {
                       return pandaproxy::schema_registry::context{s};
                   });
+                continue;
+            }
+            if (cfg.name == topic_property_kv_index_enabled) {
+                parse_and_set_optional_bool_alpha(
+                  update.properties.kv_index_enabled,
+                  cfg.value,
+                  kafka::config_resource_operation::set);
+                if (
+                  update.properties.kv_index_enabled.value.value_or(false)
+                  && (!ctx.feature_table().local().is_active(
+                        features::feature::kv_index)
+                      || !config::shard_local_cfg().kv_index_enabled())) {
+                    return make_error_alter_config_resource_response<
+                      alter_configs_resource_response>(
+                      resource,
+                      error_code::invalid_config,
+                      kv_index_create_validator::error_message);
+                }
                 continue;
             }
 
