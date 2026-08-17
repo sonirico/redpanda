@@ -326,6 +326,7 @@ fmt::iterator incremental_topic_updates::format_to(fmt::iterator it) const {
       "shadow_indexing: {}, batch_max_bytes: {}, retention_local_target_bytes: "
       "{}, retention_local_target_ms: {}, remote_delete: {}, segment_ms: {}, "
       "schema_registry_context: {}, "
+      "kv_index_enabled: {}, "
       "record_key_schema_id_validation: {}"
       "record_key_schema_id_validation_compat: {}"
       "record_key_subject_name_strategy: {}"
@@ -357,6 +358,7 @@ fmt::iterator incremental_topic_updates::format_to(fmt::iterator it) const {
       remote_delete,
       segment_ms,
       schema_registry_context,
+      kv_index_enabled,
       record_key_schema_id_validation,
       record_key_schema_id_validation_compat,
       record_key_subject_name_strategy,

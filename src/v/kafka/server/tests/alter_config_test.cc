@@ -787,6 +787,7 @@ FIXTURE_TEST(
       "redpanda.iceberg.mode",
       "redpanda.leaders.preference",
       "redpanda.schema.registry.context",
+      "redpanda.kv.index.enabled",
       "delete.retention.ms",
       "min.cleanable.dirty.ratio",
       "redpanda.remote.allowgaps",
@@ -1977,4 +1978,47 @@ FIXTURE_TEST(
     auto describe_resp = describe_configs(tp);
     assert_property_value(
       tp, "redpanda.schema.registry.context", ".mycontext", describe_resp);
+}
+
+FIXTURE_TEST(kv_index_enabled_roundtrip, alter_config_test_fixture) {
+    scoped_config config;
+    config.get("kv_index_enabled").set_value(true);
+
+    model::topic tp{"test-kv-index"};
+    BOOST_REQUIRE_EQUAL(
+      create_topic(tp, {{"cleanup.policy", "compact"}})
+        .data.topics[0]
+        .error_code,
+      kafka::error_code::none);
+
+    absl::flat_hash_map<ss::sstring, ss::sstring> props;
+    props.emplace("redpanda.kv.index.enabled", "true");
+    auto resp = alter_configs(make_alter_topic_config_resource_cv(tp, props));
+    BOOST_REQUIRE_EQUAL(resp.data.responses.size(), 1);
+    BOOST_REQUIRE_EQUAL(
+      resp.data.responses[0].error_code, kafka::error_code::none);
+
+    auto describe_resp = describe_configs(tp);
+    assert_property_value(
+      tp, "redpanda.kv.index.enabled", "true", describe_resp);
+}
+
+FIXTURE_TEST(
+  kv_index_enabled_rejected_when_cluster_disabled, alter_config_test_fixture) {
+    scoped_config config;
+    config.get("kv_index_enabled").set_value(false);
+
+    model::topic tp{"test-kv-index-disabled"};
+    BOOST_REQUIRE_EQUAL(
+      create_topic(tp, {{"cleanup.policy", "compact"}})
+        .data.topics[0]
+        .error_code,
+      kafka::error_code::none);
+
+    absl::flat_hash_map<ss::sstring, ss::sstring> props;
+    props.emplace("redpanda.kv.index.enabled", "true");
+    auto resp = alter_configs(make_alter_topic_config_resource_cv(tp, props));
+    BOOST_REQUIRE_EQUAL(resp.data.responses.size(), 1);
+    BOOST_REQUIRE_EQUAL(
+      resp.data.responses[0].error_code, kafka::error_code::invalid_config);
 }

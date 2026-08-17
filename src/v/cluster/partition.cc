@@ -894,6 +894,8 @@ ss::future<> partition::update_configuration(topic_properties new_properties) {
         cloud_storage_changed = true;
     }
 
+    co_await _raft->log()->notify_kv_index_update();
+
     // Update cached instance of topic properties
     if (_topic_cfg) {
         _topic_cfg->properties = std::move(new_properties);
