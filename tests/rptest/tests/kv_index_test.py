@@ -8,12 +8,13 @@
 # by the Apache License, Version 2.0
 
 import requests
+from ducktape.tests.test import TestContext
 from ducktape.utils.util import wait_until
 
 from rptest.clients.rpk import RpkTool
 from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
-from rptest.services.redpanda import SISettings
+from rptest.services.redpanda import PandaproxyConfig, SISettings
 from rptest.tests.redpanda_test import RedpandaTest
 
 PANDAPROXY_PORT = 8082
@@ -21,11 +22,12 @@ TOPIC = "kv-index-test"
 
 
 class KvIndexTest(RedpandaTest):
-    def __init__(self, test_context):
+    def __init__(self, test_context: TestContext):
         super().__init__(
             test_context,
             num_brokers=3,
             extra_rp_conf={"kv_index_enabled": True},
+            pandaproxy_config=PandaproxyConfig(),
         )
 
     def _lookup(self, topic: str, key: str) -> requests.Response:
@@ -38,9 +40,12 @@ class KvIndexTest(RedpandaTest):
             if r.status_code != 421:
                 return r
             last = r
+        assert last is not None
         return last
 
-    def _wait_lookup(self, topic, key, status, body=None):
+    def _wait_lookup(
+        self, topic: str, key: str, status: int, body: bytes | None = None
+    ) -> None:
         wait_until(
             lambda: (r := self._lookup(topic, key)).status_code == status
             and (body is None or r.content == body),
@@ -49,7 +54,7 @@ class KvIndexTest(RedpandaTest):
         )
 
     @cluster(num_nodes=3)
-    def test_lookup_latest_value(self):
+    def test_lookup_latest_value(self) -> None:
         rpk = RpkTool(self.redpanda)
         rpk.create_topic(
             TOPIC,
@@ -84,7 +89,7 @@ class KvIndexTest(RedpandaTest):
         self._wait_lookup(plain_topic, "k0", 404, b"topic not indexed")
 
     @cluster(num_nodes=3)
-    def test_lookup_after_restart_without_new_writes(self):
+    def test_lookup_after_restart_without_new_writes(self) -> None:
         rpk = RpkTool(self.redpanda)
         rpk.create_topic(
             TOPIC,
@@ -104,7 +109,7 @@ class KvIndexTest(RedpandaTest):
 
 
 class KvIndexTieredTest(RedpandaTest):
-    def __init__(self, test_context):
+    def __init__(self, test_context: TestContext):
         si_settings = SISettings(
             test_context,
             log_segment_size=1024 * 1024,
@@ -115,6 +120,7 @@ class KvIndexTieredTest(RedpandaTest):
             num_brokers=3,
             si_settings=si_settings,
             extra_rp_conf={"kv_index_enabled": True},
+            pandaproxy_config=PandaproxyConfig(),
         )
 
     def _lookup(self, topic: str, key: str) -> requests.Response:
@@ -127,9 +133,12 @@ class KvIndexTieredTest(RedpandaTest):
             if r.status_code != 421:
                 return r
             last = r
+        assert last is not None
         return last
 
-    def _wait_lookup(self, topic, key, status, body=None):
+    def _wait_lookup(
+        self, topic: str, key: str, status: int, body: bytes | None = None
+    ) -> None:
         wait_until(
             lambda: (r := self._lookup(topic, key)).status_code == status
             and (body is None or r.content == body),
@@ -159,12 +168,11 @@ class KvIndexTieredTest(RedpandaTest):
 
         admin = Admin(self.redpanda)
 
-        def local_data_evicted():
+        def local_data_evicted() -> bool:
             for p in (0, 1):
                 status = admin.get_partition_cloud_storage_status(TOPIC, p)
                 if not (
-                    status["local_log_start_offset"]
-                    > status["cloud_log_start_offset"]
+                    status["local_log_start_offset"] > status["cloud_log_start_offset"]
                 ):
                     return False
             return True
@@ -174,7 +182,7 @@ class KvIndexTieredTest(RedpandaTest):
         return value
 
     @cluster(num_nodes=3)
-    def test_evicted_key_is_404_by_default(self):
+    def test_evicted_key_is_404_by_default(self) -> None:
         value = self._produce_until_evicted()
 
         self._wait_lookup(
@@ -183,7 +191,7 @@ class KvIndexTieredTest(RedpandaTest):
         self._wait_lookup(TOPIC, "k19999", 200, value.encode())
 
     @cluster(num_nodes=3)
-    def test_evicted_key_reads_through_when_enabled(self):
+    def test_evicted_key_reads_through_when_enabled(self) -> None:
         value = self._produce_until_evicted()
 
         self.redpanda.set_cluster_config({"kv_index_remote_read_enabled": True})
