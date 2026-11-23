@@ -338,11 +338,11 @@ read may fall through to the remote read path is decided by the
   transaction holds the indexer back and compaction is run by hand past
   the last stable offset. Whether the broker can get there on its own,
   with an indexer that lags by a segment roll, has not been observed.
-- Tiered storage is covered in process, against the S3 imposter the
-  repository uses for its own tests: an evicted key answers 404 without
-  remote read, reads through with it, and a key still local is served.
-  The ducktape tests that cover the same on a real cluster could not be
-  run where this was developed. A compact only topic is never trimmed
+- Tiered storage is covered twice: in process, against the S3 imposter
+  the repository uses for its own tests, and by the ducktape tests on
+  three brokers with a real S3 endpoint (SeaweedFS, since MinIO no
+  longer publishes images). An evicted key answers 404 without remote
+  read and reads through with it. A compact only topic is never trimmed
   locally by retention, only `compact,delete` or disk space management
   do that, so those are the cases where a key can be evicted.
 - Records produced through Pandaproxy use Redpanda's own client
