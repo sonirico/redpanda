@@ -316,8 +316,12 @@ read may fall through to the remote read path is decided by the
   with produce load.
 - One run of 16 concurrent lookup threads against a topic being
   rewritten got 2528 empty 404 answers out of 107117 for keys that
-  existed. Eight more runs, some replaying the same sequence of
-  restarts, got none. The cause is not known.
+  existed. Nine more runs replaying the same sequence of restarts, and
+  then 12 cycles of restart plus load (1.57 million lookups), got none.
+  The cause is not known. That run predates the change that answers 503
+  for a stale index entry, which was a 404 then.
+- The 503 for a stale index entry has no test: nothing available can
+  hold the indexer back while compaction runs.
 - Tiered storage: the remote read path and local retention against the
   indexer have unit coverage for the index gap only; the ducktape tests
   that cover them could not be run where this was developed.
