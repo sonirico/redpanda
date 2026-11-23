@@ -154,10 +154,11 @@ that lands on a broker that does not host the queried partition returns
 
 ## Corner cases dissected by example.
 
-- Stale pointer after compaction: if the index points at an offset that
-  compaction has since removed or overwritten, the read path re-checks
-  key equality against the record actually read; a mismatch is treated
-  as not found and returns 404.
+- Stale pointer after compaction: compaction removes a record once a
+  later one replaces it, and it may do so before the indexer has read
+  the later one. The read path checks that the record at the indexed
+  offset exists and carries the requested key; if not, the index is
+  behind and the answer is 503, not 404.
 - Tombstones: a tombstone record (no value) is removed from the index,
   so a lookup for a tombstoned key returns 404.
 - Compressed batches: batches are decompressed before indexing and
@@ -313,6 +314,10 @@ read may fall through to the remote read path is decided by the
   one client sending 40k lookups for random keys over a single
   connection. Median 0.64 ms, p99 0.95 ms. Nothing under concurrency or
   with produce load.
+- One run of 16 concurrent lookup threads against a topic being
+  rewritten got 2528 empty 404 answers out of 107117 for keys that
+  existed. Eight more runs, some replaying the same sequence of
+  restarts, got none. The cause is not known.
 - Tiered storage: the remote read path and local retention against the
   indexer have unit coverage for the index gap only; the ducktape tests
   that cover them could not be run where this was developed.

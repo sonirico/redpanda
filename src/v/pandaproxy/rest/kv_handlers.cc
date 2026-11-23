@@ -170,8 +170,7 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
                   });
                   if (found) {
                       if (!found->has_key() || !(found->key() == key)) {
-                          co_return kv_lookup_result{
-                            kv_lookup_result::status::not_found};
+                          break;
                       }
                       if (!found->has_value()) {
                           co_return kv_lookup_result{
@@ -184,7 +183,21 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
                         .offset = koff};
                   }
               }
-              co_return kv_lookup_result{kv_lookup_result::status::not_found};
+              if (koff < local_start) {
+                  // Removed by retention, and not in tiered storage either.
+                  co_return kv_lookup_result{
+                    kv_lookup_result::status::not_found};
+              }
+              // The record the index points at is gone or holds another
+              // key: compaction removed it because a later record replaced
+              // it, and the indexer has not read that one yet.
+              vlog(
+                plog.debug,
+                "[{}] kv index entry at offset {} is stale, indexed up to {}",
+                ntp,
+                koff,
+                idx->next_offset());
+              co_return kv_lookup_result{kv_lookup_result::status::not_ready};
           });
     }
 
@@ -209,7 +222,7 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
     case kv_lookup_result::status::not_ready:
         rp.rep->set_status(
           ss::http::reply::status_type::service_unavailable,
-          "index is being built");
+          "index is catching up");
         break;
     case kv_lookup_result::status::not_found:
         rp.rep->set_status(ss::http::reply::status_type::not_found);
