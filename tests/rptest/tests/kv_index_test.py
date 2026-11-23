@@ -83,6 +83,25 @@ class KvIndexTest(RedpandaTest):
         rpk.produce(plain_topic, "k0", "v0")
         self._wait_lookup(plain_topic, "k0", 404, b"topic not indexed")
 
+    @cluster(num_nodes=3)
+    def test_lookup_after_restart_without_new_writes(self):
+        rpk = RpkTool(self.redpanda)
+        rpk.create_topic(
+            TOPIC,
+            partitions=1,
+            replicas=3,
+            config={
+                "cleanup.policy": "compact",
+                "redpanda.kv.index.enabled": "true",
+            },
+        )
+        rpk.produce(TOPIC, "k", "v")
+        self._wait_lookup(TOPIC, "k", 200, b"v")
+
+        self.redpanda.restart_nodes(self.redpanda.nodes)
+
+        self._wait_lookup(TOPIC, "k", 200, b"v")
+
 
 class KvIndexTieredTest(RedpandaTest):
     def __init__(self, test_context):
