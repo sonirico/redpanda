@@ -1,6 +1,6 @@
 # Topic key index (redpanda.kv.index.enabled)
 
-Status: proof of concept, not yet compiled against a full toolchain; branch: https://github.com/sonirico/redpanda/tree/plan/redpanda-kv-index-poc (staging PR: https://github.com/sonirico/redpanda/pull/1)
+Status: proof of concept, builds and passes its unit tests on dev; branch: https://github.com/sonirico/redpanda/tree/plan/redpanda-kv-index-poc (staging PR: https://github.com/sonirico/redpanda/pull/1)
 
 - Feature Name: topic_key_index
 - Status: draft
@@ -21,15 +21,16 @@ exposed on Pandaproxy.
 
 ## Why (short reason)
 
-Looking up the latest value for a key currently requires either scanning
-a compacted topic or running a fetch-path sidecar outside the broker.
-Both pay a full scan to locate the key, and a scan that reaches segments
-evicted to tiered storage is paid against the object store.
+Looking up the latest value for a key currently requires scanning a
+compacted topic, and a scan that reaches segments evicted to tiered
+storage is paid against the object store.
 
 ## How (short plan)
 
-Maintain an lsm-backed key-to-offset index from the append path of
+Maintain an lsm-backed key-to-offset index of the committed records of
 locally compacted topics, on every replica, at `<ntp dir>/kv_index/`.
+A per-partition fiber follows the local log up to the last stable
+offset and skips aborted transactions.
 Serve lookups in-process on Pandaproxy by resolving the partition,
 reading the index on the owning shard, and reading the record back
 through `kafka::partition_proxy::make_reader`. Records whose local
@@ -40,8 +41,7 @@ property; otherwise the lookup returns 404.
 ## Impact
 
 Enables sub-millisecond, in-broker key lookups for locally compacted
-topics that opt in, without requiring an external sidecar or a full log
-scan. The index is optional per topic, gated behind a feature flag and a
+topics that opt in, without a full log scan. The index is optional per topic, gated behind a feature flag and a
 cluster property, and defaults to off. Every replica maintains its own
 index, so read load can be served from whichever node hosts the queried
 partition, subject to that replica's index coverage and replication lag
@@ -51,18 +51,16 @@ than being forwarded.
 # Motivation
 ## Why are we doing this?
 
-The fetch-path sidecar `github.com/sonirico/rpkv` (contract suite and
-benchmarks: p50 11.07 ms / p99 16.85 ms loopback, 100k keys, see
-`docs/benchmarks/read-latency.md`) shows there is demand for key lookups
-and establishes the latency floor of any out-of-broker design. An
-out-of-broker sidecar also has no way to locate a key without scanning,
-so a key that only exists in segments evicted to tiered storage costs a
-scan through the remote read path.
+A compacted topic is commonly used as a table, but the broker has no
+way to locate a key without scanning the log, so any reader that wants
+the latest value for one key pays for all of them, and a key that only
+exists in segments evicted to tiered storage costs a scan through the
+remote read path.
 
 ## What use cases does it support?
 
 Point lookups of the latest value for a known key in a compacted topic,
-without scanning the log or running a separate lookup service.
+without scanning the log.
 
 ## What is the expected outcome?
 
@@ -116,8 +114,14 @@ partition returns 421.
 ## Interaction with other features
 
 - Requires `cleanup.policy` to include `compact`; validated at topic
-  creation and at alter-configs time by `kv_index_create_validator`
-  (`src/v/kafka/server/handlers/topics/validators.h`).
+  creation by `kv_index_create_validator`
+  (`src/v/kafka/server/handlers/topics/validators.h`) and on every
+  property update by `kv_index_validator`
+  (`src/v/cluster/topic_validators.h`), which runs on the merged
+  properties in the topic table. An update that enables the index on a
+  non-compacting topic, or removes compaction from an indexed one, is
+  rejected. The policy has to be set on the topic; one inherited from
+  the cluster default is not accepted.
 - Interacts with tiered storage: a lookup whose Kafka offset is below
   the local start offset would read through
   `kafka::partition_proxy::make_reader` into the remote read path, which
@@ -154,12 +158,15 @@ None in the proof of concept. This is an unresolved question.
   by a partition move that recovered from a snapshot, or a topic that
   enabled the index after local eviction, does not index the older keys.
   A broker that does not host the queried partition returns 421.
-- Uncommitted records: the index is fed at append time, before raft
-  commit; a lookup whose offset is at or beyond the high watermark
-  returns 404 instead of exposing a record that may still be truncated.
-- Transactions: records from aborted transactions are indexed like any
-  other and are not filtered on the read path; this is listed under
-  unresolved questions.
+- Uncommitted records and open transactions: only records below the
+  last stable offset are indexed, so a write that is not yet committed,
+  or belongs to a transaction still open, leaves the index pointing at
+  the previous committed value. A lookup returns that value, as a
+  read_committed consumer would see it.
+- Aborted transactions: batches of aborted transactions are skipped, so
+  they never replace the pointer to a committed value.
+- Lag: the index follows commits asynchronously, so a lookup right after
+  an acknowledged write may still return the previous value.
 - Custom partitioners: since the endpoint's own partition resolution
   only knows the default murmur2 partitioner, callers that produced
   with a different partitioner must pass `?partition=N` explicitly.
@@ -174,37 +181,41 @@ None in the proof of concept. This is an unresolved question.
   the record's Kafka offset, translated at index time; `last_applied()`
   reports the highest durably indexed log offset so that opening the
   index resumes indexing from `last_applied()+1`.
-- `disk_log_impl` (`src/v/storage/disk_log_impl.cc`): opens the index
-  when `kv_index_wanted()` (the topic property is requested, the log is
-  locally compacted, and the cluster property is enabled), closes it on
-  log close/remove, rebuilds it via `rebuild_kv_index()` when a suffix
-  truncation point is at or before the last indexed offset, and indexes
-  every appended batch from `disk_log_appender` via
-  `kv_index_batch()`. `notify_kv_index_update()` re-evaluates whether
-  the index is wanted and opens or closes it accordingly; `get_kv_index()`
-  exposes the current index, if any.
+- `cluster::kv_indexer` (`src/v/cluster/kv_indexer.h`): owns the index
+  of one partition replica and runs a background fiber. Each pass waits
+  for the raft commit index to advance and for `rm_stm` to apply it,
+  reads the local log from where it left off up to the offset before
+  the last stable offset, drops batches that fall in an aborted
+  transaction range of their producer, and indexes the rest.
+- `cluster::partition` (`src/v/cluster/partition.cc`): starts the
+  indexer when `kv_index_wanted()` (the topic property is requested,
+  the log is locally compacted, and the cluster property is enabled),
+  stops it on partition stop, starts or stops it from
+  `update_configuration`, and removes the index directory when the
+  index is disabled or the partition is removed. `kv_indexer()` exposes
+  the current indexer, if any.
 - `pandaproxy::rest` (`src/v/pandaproxy/rest/kv_handlers.cc`):
   `GET /kv/{topic}/{key}` resolves the partition (murmur2 of the key
   when `partition` is not given), locates the owning shard via
   `shard_table` and `partition_manager`, looks the key up in that
-  partition's `storage::kv_index` on the owning shard, rejects offsets
-  at or beyond the high watermark, rejects offsets below the local
+  partition's `cluster::kv_indexer` on the owning shard, rejects
+  offsets below the local
   start unless `kv_index_remote_read_enabled` is set, and reads the
   record through `kafka::partition_proxy::make_reader`.
 
 ## Detailed design - How it works
 
-On the write path, every replica of a locally compacted topic with
-`redpanda.kv.index.enabled` set indexes each appended batch as it is
-written, recording the offset of the latest record for each key seen.
-Because there is no WAL, the index only durably reflects offsets it has
-flushed; on open, `disk_log_impl` compares `last_applied()` against the
-log's dirty offset and, if the index is ahead of the log (for example
-after an unclean shutdown), rebuilds the index from the log rather than
-trusting a partially-written state. Suffix truncation similarly
-triggers a rebuild whenever the truncation point is at or before the
-last indexed offset, since the index may reference offsets that no
-longer exist. Removing the partition removes the index directory.
+Indexing is off the write path. Every replica of a locally compacted
+topic with `redpanda.kv.index.enabled` set runs a `kv_indexer` that
+follows its own log and records the offset of the latest committed
+record for each key. Because there is no WAL, the index only durably
+reflects offsets it has flushed; on open, the indexer compares
+`last_applied()` against the log's dirty offset and, if the index is
+ahead of the log (for example after an unclean shutdown that lost
+acknowledged data), rebuilds the index from the log rather than
+trusting a partially-written state. Raft never truncates committed
+offsets, so there is no rebuild on suffix truncation. Removing the
+partition removes the index directory.
 
 On the read path, Pandaproxy resolves the partition for the requested
 key, dispatches to the shard that hosts it, and performs the index
@@ -221,9 +232,11 @@ read may fall through to the remote read path is decided by the
 - Memory per partition: each open index carries roughly a 1 MiB
   memtable and a 1 MiB block cache, plus its own open file descriptors,
   for every partition of every topic that enables the index.
-- Rebuild cost on restart: if the index was not durably flushed before
-  a restart, it is rebuilt from the log before it can serve lookups,
-  which is a scan of the un-flushed tail of the log.
+- Catch-up cost on restart: if the index was not durably flushed before
+  a restart, the indexer rescans the un-flushed tail of the log. Lookups
+  are served meanwhile and may return older values until it catches up.
+- Enabling the index on an existing topic scans its whole local log in
+  the background.
 - The lookup endpoint is a data-plane read exposed on the Pandaproxy
   port without quotas, unlike other data-plane paths.
 
@@ -237,15 +250,13 @@ read may fall through to the remote read path is decided by the
   reassignment without extra replication logic), and piggybacks on the
   existing tiered-storage read path instead of duplicating it.
 - What other designs have been considered?
-  An admin API v2 ConnectRPC service, a Kafka protocol extension, and
-  an external sidecar (the existing `github.com/sonirico/rpkv`) were
-  considered. The sidecar approach was already prototyped and
-  benchmarked; its latency floor and inability to serve evicted keys
-  without a broker fetch motivated the in-broker approach described
-  here.
+  An admin API v2 ConnectRPC service and a Kafka protocol extension
+  were considered. Indexing from the append path was prototyped first
+  and dropped: with one offset per key, an uncommitted or aborted write
+  replaced the pointer to the committed value.
 - What is the impact of not doing this?
-  Users needing key lookups continue to rely on the out-of-broker
-  sidecar or on scanning compacted topics themselves.
+  Users needing key lookups continue to scan compacted topics
+  themselves.
 
 ## Unresolved questions
 
@@ -258,5 +269,5 @@ read may fall through to the remote read path is decided by the
   is in the proof of concept.
 - Exposing the index lookup over the Kafka protocol instead of, or in
   addition to, the Pandaproxy REST endpoint.
-- Whether the lookup path should filter records from aborted transactions
-  as the fetch path does.
+- Scale: one `lsm::database` per indexed partition has not been
+  exercised with thousands of partitions.
