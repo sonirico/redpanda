@@ -4659,9 +4659,11 @@ configuration::configuration(ctor_key)
       *this,
       "kv_index_enabled",
       "Cluster-wide switch for the per-topic key index enabled by the "
-      "redpanda.kv.index.enabled topic property. When false, no index is "
-      "maintained and the key lookup endpoint returns 404 for every topic.",
-      {.needs_restart = needs_restart::no, .visibility = visibility::user},
+      "redpanda.kv.index.enabled topic property. When false, the topic "
+      "property cannot be set, no index is maintained and the key lookup "
+      "endpoint returns 404 for every topic. Partitions that are already "
+      "running pick up a change on restart.",
+      {.needs_restart = needs_restart::yes, .visibility = visibility::user},
       false)
   , kv_index_remote_read_enabled(
       *this,
