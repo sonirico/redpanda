@@ -259,8 +259,9 @@ read may fall through to the remote read path is decided by the
 
 ## Drawbacks
 
-- Memory: one memtable entry takes about 900 bytes besides its key, far
-  more than lsm counts. Unflushed entries are bounded per shard by
+- Memory: one memtable entry takes about 900 bytes besides its key
+  (measured the same on a fastbuild and on a release build), far more
+  than lsm counts. Unflushed entries are bounded per shard by
   `memtable_budget`, or by 64 KiB per indexed partition when there are
   more partitions than the budget can give that much to. Each index
   also has a block cache of up to 1 MiB, filled by lookups, and its own
