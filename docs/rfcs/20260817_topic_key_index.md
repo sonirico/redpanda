@@ -308,7 +308,11 @@ read may fall through to the remote read path is decided by the
   addition to, the Pandaproxy REST endpoint.
 - Scale: one `lsm::database` per indexed partition was exercised with
   1000 partitions per shard, not more, and only for memory.
-- Lookup latency has only been measured on an unoptimized build.
+- Lookup latency has one data point: a release build, three brokers
+  with one core each on one machine, one partition holding 400k keys,
+  one client sending 40k lookups for random keys over a single
+  connection. Median 0.64 ms, p99 0.95 ms. Nothing under concurrency or
+  with produce load.
 - Tiered storage: the remote read path and local retention against the
   indexer have unit coverage for the index gap only; the ducktape tests
   that cover them could not be run where this was developed.
