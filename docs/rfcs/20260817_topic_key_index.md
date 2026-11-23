@@ -334,8 +334,10 @@ read may fall through to the remote read path is decided by the
   is not known. That run
   predates the change that answers 503 for a stale index entry, which
   was a 404 then.
-- The 503 for a stale index entry has no test: nothing available can
-  hold the indexer back while compaction runs.
+- The 503 for a stale index entry is tested by staging it: an open
+  transaction holds the indexer back and compaction is run by hand past
+  the last stable offset. Whether the broker can get there on its own,
+  with an indexer that lags by a segment roll, has not been observed.
 - Tiered storage is covered in process, against the S3 imposter the
   repository uses for its own tests: an evicted key answers 404 without
   remote read, reads through with it, and a key still local is served.
