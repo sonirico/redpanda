@@ -53,7 +53,7 @@ class KvIndexTest(RedpandaTest):
         rpk = RpkTool(self.redpanda)
         rpk.create_topic(
             TOPIC,
-            partitions=2,
+            partitions=3,
             replicas=3,
             config={
                 "cleanup.policy": "compact",

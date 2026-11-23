@@ -98,8 +98,11 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
               ss::http::reply::status_type::bad_request, "empty key");
             co_return std::move(rp);
         }
+        // Same as the default partitioner of the Java client, librdkafka's
+        // murmur2 and franz-go: the sign bit is cleared before the modulo.
         partition = model::partition_id(
-          murmur2(key.data(), key.size()) % md->get().get_assignments().size());
+          (murmur2(key.data(), key.size()) & 0x7fffffffU)
+          % md->get().get_assignments().size());
     }
 
     model::ntp ntp{model::kafka_namespace, topic, *partition};
