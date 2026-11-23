@@ -238,7 +238,9 @@ that lands on a broker that does not host the queried partition returns
   in it on the owning shard, rejects
   offsets below the local
   start unless `kv_index_remote_read_enabled` is set, and reads the
-  record through `kafka::partition_proxy::make_reader`.
+  record through `kafka::partition_proxy::make_reader`, skipping the
+  log's readers cache: a lookup is not followed by a read of the next
+  offset, so every lookup added a reader to the cache and evicted one.
 
 ## Detailed design - How it works
 
@@ -327,8 +329,9 @@ read may fall through to the remote read path is decided by the
   that led to it with the binaries of the time and every 404 path
   traced, not with leadership moved every 2 seconds, not with each
   broker frozen for 4 seconds in turn, and not with 1 MiB segments
-  being compacted and merged under the lookups. Two explanations were
-  checked against the code and do not hold: an lsm lookup racing a
+  being compacted and merged under the lookups, with or without the
+  log's readers cache in the read path. Two explanations were checked
+  against the code and do not hold: an lsm lookup racing a
   memtable flush (the lookup reads the memtable, the frozen memtable
   and the current version without suspending in between), and raft
   clamping the read below an indexed offset (the last visible index is
