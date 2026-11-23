@@ -14,13 +14,17 @@
 #include "cluster/cloud_metadata/tests/manual_mixin.h"
 #include "cluster/kv_indexer.h"
 #include "cluster/partition.h"
+#include "cluster/rm_stm.h"
 #include "cluster/topic_properties.h"
 #include "http/client.h"
 #include "model/fundamental.h"
 #include "model/namespace.h"
+#include "model/record.h"
 #include "pandaproxy/test/utils.h"
+#include "raft/consensus.h"
 #include "redpanda/tests/fixture.h"
 #include "storage/log.h"
+#include "storage/record_batch_builder.h"
 #include "storage/types.h"
 #include "test_utils/async.h"
 #include "test_utils/scoped_config.h"
@@ -167,4 +171,71 @@ TEST_F(KvIndexTieredFixture, LocalKeyIsServedAfterEviction) {
 
     EXPECT_EQ(res.headers.result(), bh::status::ok);
     EXPECT_EQ(res.body, "val17");
+}
+
+TEST_F(KvIndexTieredFixture, StaleEntryIs503) {
+    // An open transaction holds the last stable offset, and with it the
+    // indexer, below the second write of the key. Compaction is then run past
+    // that offset, which the broker itself never does, so that it removes the
+    // record the index still points at.
+    cluster::topic_properties props;
+    props.cleanup_policy_bitflags = model::cleanup_policy_bitflags::compaction;
+    props.kv_index_enabled = true;
+    add_topic({model::kafka_namespace, topic}, 1, props).get();
+    wait_for_leader(ntp).get();
+    auto partition = app.partition_manager.local().get(ntp);
+    auto log = partition->log();
+    auto client = make_proxy_client();
+    tests::kafka_produce_transport producer(make_kafka_client().get());
+    producer.start().get();
+    auto deferred_p_close = ss::defer([&producer] { producer.stop().get(); });
+    producer.produce_to_partition(topic, ntp.tp.partition, {{"k", "v1"}}).get();
+    for (int i = 0; i < 200; ++i) {
+        if (lookup(client, "k").headers.result() == bh::status::ok) {
+            break;
+        }
+        ss::sleep(100ms).get();
+    }
+    ASSERT_EQ(lookup(client, "k").body, "v1");
+    const model::producer_identity tx_pid{1000, 0};
+    const model::tx_seq tx_seq{0};
+    auto rm_stm = partition->rm_stm();
+    ASSERT_TRUE(
+      (bool)rm_stm->begin_tx(tx_pid, tx_seq, 30min, ntp.tp.partition).get());
+    storage::record_batch_builder builder(
+      model::record_batch_type::raft_data, model::offset(0));
+    builder.set_producer_identity(tx_pid.id, tx_pid.epoch);
+    builder.set_transactional_type();
+    builder.add_raw_kv(iobuf::from("in-tx"), iobuf::from("x"));
+    auto tx_batch = std::move(builder).build();
+    tx_batch.header().base_sequence = 0;
+    tx_batch.header().reset_size_checksum_metadata(tx_batch.data());
+    ASSERT_TRUE(
+      rm_stm
+        ->replicate(
+          model::batch_identity::from(tx_batch.header()),
+          std::move(tx_batch),
+          raft::replicate_options(raft::consistency_level::quorum_ack))
+        .get()
+        .has_value());
+    producer.produce_to_partition(topic, ntp.tp.partition, {{"k", "v2"}}).get();
+    log->flush().get();
+    log->force_roll().get();
+    ss::abort_source as;
+    storage::housekeeping_config housekeeping_conf(
+      model::timestamp::min(),
+      std::nullopt,
+      model::offset::max(),
+      model::offset::max(),
+      model::offset::max(),
+      std::nullopt,
+      std::nullopt,
+      std::chrono::milliseconds{0},
+      as);
+    log->housekeeping(housekeeping_conf).get();
+
+    auto res = lookup(client, "k");
+
+    EXPECT_EQ(res.headers.result(), bh::status::service_unavailable);
+    EXPECT_EQ(res.body, "index is catching up");
 }
