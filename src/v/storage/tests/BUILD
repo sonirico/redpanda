@@ -209,26 +209,6 @@ redpanda_cc_gtest(
 )
 
 redpanda_cc_gtest(
-    name = "kv_index_log_test",
-    timeout = "short",
-    srcs = [
-        "kv_index_log_test.cc",
-    ],
-    deps = [
-        ":disk_log_builder",
-        ":disk_log_builder_fixture",
-        "//src/v/base",
-        "//src/v/config",
-        "//src/v/model",
-        "//src/v/storage",
-        "//src/v/storage:record_batch_builder",
-        "//src/v/test_utils:gtest",
-        "@googletest//:gtest",
-        "@seastar",
-    ],
-)
-
-redpanda_cc_gtest(
     name = "log_segment_appender_test",
     timeout = "short",
     srcs = [

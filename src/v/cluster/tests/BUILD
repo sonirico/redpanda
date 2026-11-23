@@ -1563,6 +1563,31 @@ redpanda_cc_btest(
     ],
 )
 
+redpanda_cc_btest(
+    name = "kv_indexer_test",
+    timeout = "short",
+    srcs = [
+        "kv_indexer_test.cc",
+    ],
+    cpu = 1,
+    deps = [
+        ":rm_stm_test_fixture",
+        "//src/v/bytes",
+        "//src/v/bytes:iobuf",
+        "//src/v/cluster",
+        "//src/v/config",
+        "//src/v/model",
+        "//src/v/raft",
+        "//src/v/storage",
+        "//src/v/storage:record_batch_builder",
+        "//src/v/test_utils:async",
+        "//src/v/test_utils:seastar_boost",
+        "@boost//:test",
+        "@seastar",
+        "@seastar//:testing",
+    ],
+)
+
 redpanda_test_cc_library(
     name = "tx_compaction_utils",
     hdrs = [

@@ -16,6 +16,7 @@
 #include "cluster/archival/archival_metadata_stm.h"
 #include "cluster/archival/fwd.h"
 #include "cluster/fwd.h"
+#include "cluster/kv_indexer.h"
 #include "cluster/partition_probe.h"
 #include "cluster/partition_properties_stm.h"
 #include "cluster/types.h"
@@ -222,6 +223,9 @@ public:
 
     ss::future<> update_configuration(topic_properties);
 
+    /// The key index of this partition, nullptr when not enabled.
+    cluster::kv_indexer* kv_indexer() { return _kv_indexer.get(); }
+
     const storage::ntp_config& get_ntp_config() const;
     ss::shared_ptr<cluster::tm_stm> tm_stm();
 
@@ -425,9 +429,14 @@ private:
     // dirty so that it gets reuploaded
     ss::future<> restart_archiver(bool should_notify_topic_config);
 
+    bool kv_index_wanted() const;
+    ss::future<> start_kv_indexer();
+    ss::future<> stop_kv_indexer();
+
     consensus_ptr _raft; // never null
     ss::shared_ptr<cluster::log_eviction_stm> _log_eviction_stm;
     ss::shared_ptr<cluster::rm_stm> _rm_stm;
+    std::unique_ptr<cluster::kv_indexer> _kv_indexer;
     ss::shared_ptr<archival_metadata_stm> _archival_meta_stm;
     ss::shared_ptr<partition_properties_stm> _partition_properties_stm;
     ss::sharded<cloud_topics::state_accessors>* _cloud_topics_state;

@@ -11,7 +11,6 @@
 
 #include "bytes/bytes.h"
 #include "cluster/partition.h"
-#include "cluster/partition_kafka_offsets.h"
 #include "cluster/partition_manager.h"
 #include "cluster/shard_table.h"
 #include "cluster/topic_table.h"
@@ -31,7 +30,6 @@
 #include "security/acl.h"
 #include "security/authorizer.h"
 #include "security/request_auth.h"
-#include "storage/kv_index.h"
 #include "storage/log.h"
 #include "storage/translating_reader.h"
 
@@ -119,7 +117,7 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
                   co_return kv_lookup_result{
                     kv_lookup_result::status::not_hosted};
               }
-              auto* idx = p->log()->get_kv_index();
+              auto* idx = p->kv_indexer();
               if (!idx) {
                   co_return kv_lookup_result{
                     kv_lookup_result::status::not_indexed};
@@ -131,11 +129,6 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
                     kv_lookup_result::status::not_found};
               }
               auto koff = *off;
-              if (
-                koff >= model::offset_cast(cluster::kafka_high_watermark(*p))) {
-                  co_return kv_lookup_result{
-                    kv_lookup_result::status::not_found};
-              }
               auto local_start = model::offset_cast(
                 p->log()->from_log_offset(p->raft_start_offset()));
               if (
