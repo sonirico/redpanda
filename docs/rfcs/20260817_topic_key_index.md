@@ -158,7 +158,11 @@ that lands on a broker that does not host the queried partition returns
   later one replaces it, and it may do so before the indexer has read
   the later one. The read path checks that the record at the indexed
   offset exists and carries the requested key; if not, the index is
-  behind and the answer is 503, not 404.
+  behind and the answer is 503, not 404. Compaction only touches closed
+  segments below the last stable offset, which is also how far the
+  indexer reads, so this needs the indexer to lag by a segment roll and
+  a compaction run: an overloaded or failing indexer, since while it is
+  building or catching up after a start the answer is 503 already.
 - Tombstones: a tombstone record (no value) is removed from the index,
   so a lookup for a tombstoned key returns 404.
 - Compressed batches: batches are decompressed before indexing and
