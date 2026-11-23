@@ -73,8 +73,8 @@ struct kv_fixture : pandaproxy_test_fixture {
       std::string_view value,
       int partition) {
         auto b64 = [](std::string_view s) {
-            return bytes_to_base64(bytes_view(
-              reinterpret_cast<const uint8_t*>(s.data()), s.size()));
+            return bytes_to_base64(
+              bytes_view(reinterpret_cast<const uint8_t*>(s.data()), s.size()));
         };
         auto json = fmt::format(
           R"({{"records":[{{"key":"{}","value":"{}","partition":{}}}]}})",
@@ -141,8 +141,7 @@ FIXTURE_TEST(lookup_of_unknown_key_is_404, kv_fixture) {
 }
 
 FIXTURE_TEST(lookup_on_topic_without_index_is_404, kv_fixture) {
-    add_topic(model::topic_namespace_view(model::kafka_namespace, topic))
-      .get();
+    add_topic(model::topic_namespace_view(model::kafka_namespace, topic)).get();
     auto client = make_proxy_client();
 
     auto res = lookup(client, "k");

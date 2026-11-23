@@ -322,9 +322,13 @@ read may fall through to the remote read path is decided by the
   for a stale index entry, which was a 404 then.
 - The 503 for a stale index entry has no test: nothing available can
   hold the indexer back while compaction runs.
-- Tiered storage: the remote read path and local retention against the
-  indexer have unit coverage for the index gap only; the ducktape tests
-  that cover them could not be run where this was developed.
+- Tiered storage is covered in process, against the S3 imposter the
+  repository uses for its own tests: an evicted key answers 404 without
+  remote read, reads through with it, and a key still local is served.
+  The ducktape tests that cover the same on a real cluster could not be
+  run where this was developed. A compact only topic is never trimmed
+  locally by retention, only `compact,delete` or disk space management
+  do that, so those are the cases where a key can be evicted.
 - Records produced through Pandaproxy use Redpanda's own client
   partitioner, which does not clear the sign bit of the hash. For those
   the endpoint derives a different partition unless the partition count
