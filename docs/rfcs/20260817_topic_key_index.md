@@ -215,7 +215,9 @@ that lands on a broker that does not host the queried partition returns
   index resumes indexing from `last_applied()+1`.
 - `cluster::kv_indexer` (`src/v/cluster/kv_indexer.h`): owns the index
   of one partition replica and runs a background fiber. Each pass waits
-  for the raft commit index to advance and for `rm_stm` to apply it,
+  for the raft commit index to advance, or for a deadline since the
+  last stable offset can move without a new commit, and for `rm_stm` to
+  apply what is committed,
   reads the local log from where it left off up to the offset before
   the last stable offset, drops batches that fall in an aborted
   transaction range of their producer, and indexes the rest. It drops
