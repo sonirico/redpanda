@@ -25,6 +25,8 @@
 #include "storage/log.h"
 #include "storage/types.h"
 
+#include <seastar/core/condition-variable.hh>
+#include <seastar/core/lowres_clock.hh>
 #include <seastar/core/metrics.hh>
 #include <seastar/core/sleep.hh>
 
@@ -36,6 +38,9 @@ namespace cluster {
 
 namespace {
 
+// How long a pass waits for a commit before looking again, once the index
+// has caught up and while it has not.
+constexpr auto lso_recheck_interval = std::chrono::seconds(1);
 constexpr auto lso_poll_interval = std::chrono::milliseconds(100);
 
 std::filesystem::path index_dir(const storage::ntp_config& cfg) {
@@ -183,16 +188,22 @@ ss::future<> kv_indexer::run_loop() {
                   committed, model::no_timeout, _as);
             }
             co_await index_committed();
-            if (!_caught_up) {
-                // The last stable offset is not known yet, e.g. right after
-                // a restart, and no commit has to follow to signal it.
-                co_await ss::sleep_abortable(lso_poll_interval, _as)
-                  .handle_exception([](const std::exception_ptr&) {});
-                continue;
-            }
-            co_await _raft->commit_index_updated().wait(_as, [this, committed] {
-                return _raft->committed_offset() > committed;
-            });
+            // The last stable offset can become known, or advance, without
+            // the commit index moving: right after a restart, or when rm_stm
+            // reported its last known value. So a commit wakes the next pass
+            // up, and so does a deadline.
+            auto deadline
+              = ss::lowres_clock::now()
+                + (_caught_up ? lso_recheck_interval : lso_poll_interval);
+            co_await _raft->commit_index_updated()
+              .wait(
+                deadline,
+                _as,
+                [this, committed] {
+                    return _raft->committed_offset() > committed;
+                })
+              .handle_exception_type(
+                [](const ss::condition_variable_timed_out&) {});
         } catch (...) {
             err = std::current_exception();
         }
