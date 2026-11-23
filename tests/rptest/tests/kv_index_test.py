@@ -144,7 +144,8 @@ class KvIndexTieredTest(RedpandaTest):
             partitions=2,
             replicas=3,
             config={
-                "cleanup.policy": "compact",
+                # Local retention only trims a log whose policy has delete.
+                "cleanup.policy": "compact,delete",
                 "redpanda.kv.index.enabled": "true",
                 "redpanda.remote.write": "true",
                 "redpanda.remote.read": "true",
