@@ -1992,6 +1992,9 @@ FIXTURE_TEST(kv_index_enabled_roundtrip, alter_config_test_fixture) {
       kafka::error_code::none);
 
     absl::flat_hash_map<ss::sstring, ss::sstring> props;
+    // alter_configs replaces the whole topic config, so the compaction
+    // policy the index depends on has to be restated.
+    props.emplace("cleanup.policy", "compact");
     props.emplace("redpanda.kv.index.enabled", "true");
     auto resp = alter_configs(make_alter_topic_config_resource_cv(tp, props));
     BOOST_REQUIRE_EQUAL(resp.data.responses.size(), 1);
@@ -2018,6 +2021,60 @@ FIXTURE_TEST(
     absl::flat_hash_map<ss::sstring, ss::sstring> props;
     props.emplace("redpanda.kv.index.enabled", "true");
     auto resp = alter_configs(make_alter_topic_config_resource_cv(tp, props));
+    BOOST_REQUIRE_EQUAL(resp.data.responses.size(), 1);
+    BOOST_REQUIRE_EQUAL(
+      resp.data.responses[0].error_code, kafka::error_code::invalid_config);
+}
+
+FIXTURE_TEST(
+  kv_index_enabled_rejected_without_compaction, alter_config_test_fixture) {
+    scoped_config config;
+    config.get("kv_index_enabled").set_value(true);
+
+    model::topic tp{"test-kv-index-not-compacted"};
+    BOOST_REQUIRE_EQUAL(
+      create_topic(tp, {{"cleanup.policy", "delete"}})
+        .data.topics[0]
+        .error_code,
+      kafka::error_code::none);
+
+    absl::flat_hash_map<
+      ss::sstring,
+      std::pair<std::optional<ss::sstring>, kafka::config_resource_operation>>
+      props;
+    props.emplace(
+      "redpanda.kv.index.enabled",
+      std::make_pair("true", kafka::config_resource_operation::set));
+    auto resp = incremental_alter_configs(
+      make_incremental_alter_topic_config_resource_cv(tp, props));
+    BOOST_REQUIRE_EQUAL(resp.data.responses.size(), 1);
+    BOOST_REQUIRE_EQUAL(
+      resp.data.responses[0].error_code, kafka::error_code::invalid_config);
+}
+
+FIXTURE_TEST(
+  compaction_removal_rejected_with_kv_index, alter_config_test_fixture) {
+    scoped_config config;
+    config.get("kv_index_enabled").set_value(true);
+
+    model::topic tp{"test-kv-index-drop-compaction"};
+    BOOST_REQUIRE_EQUAL(
+      create_topic(
+        tp,
+        {{"cleanup.policy", "compact"}, {"redpanda.kv.index.enabled", "true"}})
+        .data.topics[0]
+        .error_code,
+      kafka::error_code::none);
+
+    absl::flat_hash_map<
+      ss::sstring,
+      std::pair<std::optional<ss::sstring>, kafka::config_resource_operation>>
+      props;
+    props.emplace(
+      "cleanup.policy",
+      std::make_pair("delete", kafka::config_resource_operation::set));
+    auto resp = incremental_alter_configs(
+      make_incremental_alter_topic_config_resource_cv(tp, props));
     BOOST_REQUIRE_EQUAL(resp.data.responses.size(), 1);
     BOOST_REQUIRE_EQUAL(
       resp.data.responses[0].error_code, kafka::error_code::invalid_config);

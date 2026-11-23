@@ -43,4 +43,15 @@ struct schema_id_validation_validator {
     }
 };
 
+struct kv_index_validator {
+    static constexpr const char* error_message
+      = "redpanda.kv.index.enabled requires a compacting cleanup.policy";
+    static constexpr errc ec = errc::topic_invalid_config;
+
+    static bool is_valid(const cluster::topic_properties& p) {
+        return !p.kv_index_enabled.value_or(false)
+               || (p.cleanup_policy_bitflags && model::is_compaction_enabled(*p.cleanup_policy_bitflags));
+    }
+};
+
 } // namespace cluster

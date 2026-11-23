@@ -1284,6 +1284,10 @@ topic_table::apply(update_topic_properties_cmd cmd, model::offset o) {
         co_return schema_id_validation_validator::ec;
     }
 
+    if (!kv_index_validator::is_valid(updated_properties)) {
+        co_return kv_index_validator::ec;
+    }
+
     // Apply the changes
     properties = std::move(updated_properties);
 
