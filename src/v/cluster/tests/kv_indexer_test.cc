@@ -63,14 +63,15 @@ struct kv_indexer_fixture : rm_stm_test_fixture {
       model::producer_identity pid,
       int32_t seq,
       bool transactional,
-      std::string_view value) {
+      std::string_view value,
+      std::string_view k = key) {
         storage::record_batch_builder builder(
           model::record_batch_type::raft_data, model::offset(0));
         builder.set_producer_identity(pid.id, pid.epoch);
         if (transactional) {
             builder.set_transactional_type();
         }
-        builder.add_raw_kv(iobuf::from(key), iobuf::from(value));
+        builder.add_raw_kv(iobuf::from(k), iobuf::from(value));
         auto batch = std::move(builder).build();
         batch.header().base_sequence = seq;
         batch.header().reset_size_checksum_metadata(batch.data());
@@ -99,10 +100,10 @@ struct kv_indexer_fixture : rm_stm_test_fixture {
         });
     }
 
-    std::optional<kafka::offset> lookup() {
+    std::optional<kafka::offset> lookup(std::string_view k = key) {
         return indexer
-          ->lookup(bytes_view(
-            reinterpret_cast<const uint8_t*>(key.data()), key.size()))
+          ->lookup(
+            bytes_view(reinterpret_cast<const uint8_t*>(k.data()), k.size()))
           .get();
     }
 
@@ -186,4 +187,28 @@ FIXTURE_TEST(records_written_while_stopped_are_indexed, kv_indexer_fixture) {
 
     wait_indexed_past(first);
     BOOST_REQUIRE_EQUAL(lookup(), first);
+}
+
+FIXTURE_TEST(
+  prefix_truncation_past_indexer_drops_stale_entry, kv_indexer_fixture) {
+    // The log start moves past records the indexer has not read yet, as when
+    // a follower installs a snapshot. The update of the key is in that gap,
+    // so the entry indexed before it must not be served.
+    auto first = write(plain_pid, 0, false, "v1");
+    wait_indexed_past(first);
+    indexer->stop().get();
+    auto second = write(plain_pid, 1, false, "v2");
+    auto second_log = _raft->log()->to_log_offset(kafka::offset_cast(second));
+    BOOST_REQUIRE(
+      _stm->wait_no_throw(second_log, model::timeout_clock::now() + 10s).get());
+    _raft->write_snapshot(raft::write_snapshot_cfg(second_log, iobuf())).get();
+    BOOST_REQUIRE_GT(_raft->log()->offsets().start_offset, second_log);
+
+    auto other = write(plain_pid, 2, false, "v", "other");
+
+    start_indexer();
+
+    wait_indexed_past(other);
+    BOOST_REQUIRE_EQUAL(lookup("other"), other);
+    BOOST_REQUIRE(!lookup().has_value());
 }

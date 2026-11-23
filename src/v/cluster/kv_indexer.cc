@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <utility>
 
 namespace cluster {
 
@@ -73,14 +74,14 @@ kv_indexer::~kv_indexer() = default;
 ss::future<> kv_indexer::start() {
     auto dir = index_dir(_raft->log_config());
     _index = co_await storage::kv_index::open({.dir = dir});
-    if (_index->last_applied() > _raft->log()->offsets().dirty_offset) {
-        // The log lost a suffix the index had already seen, e.g. an unclean
-        // shutdown with write caching. Rebuild from the log.
-        co_await _index->close();
-        co_await storage::kv_index::remove(dir);
-        _index = co_await storage::kv_index::open({.dir = dir});
-    }
     _next = model::next_offset(_index->last_applied());
+    if (
+      _index->last_applied() > _raft->log()->offsets().dirty_offset
+      || has_gap()) {
+        // Either the log lost a suffix the index had already seen, e.g. an
+        // unclean shutdown with write caching, or see has_gap().
+        co_await reset_index();
+    }
     vlog(
       clusterlog.info,
       "[{}] kv index opened at {}, resuming from {}",
@@ -107,7 +108,27 @@ ss::future<> kv_indexer::stop() {
 }
 
 ss::future<std::optional<kafka::offset>> kv_indexer::lookup(bytes_view key) {
+    if (!_index) {
+        return ss::make_ready_future<std::optional<kafka::offset>>(
+          std::nullopt);
+    }
     return _index->lookup(key);
+}
+
+bool kv_indexer::has_gap() const {
+    return _index->last_applied() >= model::offset(0)
+           && _next < _raft->log()->offsets().start_offset;
+}
+
+ss::future<> kv_indexer::reset_index() {
+    auto dir = index_dir(_raft->log_config());
+    vlog(clusterlog.info, "[{}] rebuilding kv index at {}", _raft->ntp(), dir);
+    if (auto old = std::exchange(_index, nullptr)) {
+        co_await old->close();
+    }
+    co_await storage::kv_index::remove(dir);
+    _index = co_await storage::kv_index::open({.dir = dir});
+    _next = model::next_offset(_index->last_applied());
 }
 
 ss::future<> kv_indexer::remove_index(const storage::ntp_config& cfg) {
@@ -153,6 +174,9 @@ ss::future<> kv_indexer::index_committed() {
                        : model::next_offset(_raft->last_visible_index());
     if (lso == model::invalid_lso) {
         co_return;
+    }
+    if (!_index || has_gap()) {
+        co_await reset_index();
     }
     auto log = _raft->log();
     auto start = std::max(_next, log->offsets().start_offset);

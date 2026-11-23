@@ -35,7 +35,8 @@ namespace cluster {
 /// Only records below the last stable offset are indexed, and records of
 /// aborted transactions are skipped, so the index never points at a record
 /// a read_committed consumer could not see. Raft does not truncate committed
-/// offsets, so the index is only ever appended to.
+/// offsets, so the index is only ever appended to. It covers a contiguous
+/// range of the local log: lookups miss keys last written before that range.
 class kv_indexer {
 public:
     kv_indexer(raft::consensus*, ss::shared_ptr<rm_stm>);
@@ -57,6 +58,11 @@ public:
 private:
     ss::future<> run_loop();
     ss::future<> index_committed();
+    /// The log start moved past records that were never indexed (snapshot
+    /// installed on a follower, local retention). Entries indexed before the
+    /// gap may have been superseded inside it, so the index cannot be kept.
+    bool has_gap() const;
+    ss::future<> reset_index();
 
     raft::consensus* _raft;
     ss::shared_ptr<rm_stm> _rm_stm;
