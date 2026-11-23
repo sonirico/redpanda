@@ -43,6 +43,11 @@ public:
     struct options {
         std::filesystem::path dir;
         size_t write_buffer_size = 1_MiB;
+        /// Memory all the indexes of a shard may hold in unflushed entries.
+        /// Each index flushes once it passes an equal share of it, however
+        /// far it is from write_buffer_size, which lsm counts without the
+        /// per entry overhead. Zero means 5% of the shard's memory.
+        size_t memtable_budget = 0;
         size_t block_cache_size = 1_MiB;
         uint32_t max_open_files = 64;
     };
@@ -63,10 +68,14 @@ public:
     static ss::future<> remove(std::filesystem::path dir);
 
 private:
-    kv_index(lsm::database, model::offset last_applied);
+    kv_index(lsm::database, model::offset last_applied, const options&);
+
+    size_t memtable_share() const;
 
     lsm::database _db;
     model::offset _last_applied;
+    size_t _memtable_budget;
+    size_t _unflushed_bytes{0};
     ss::gate _gate;
 };
 

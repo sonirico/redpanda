@@ -9,6 +9,7 @@
  * by the Apache License, Version 2.0
  */
 
+#include "base/units.h"
 #include "bytes/bytes.h"
 #include "bytes/iobuf.h"
 #include "model/compression.h"
@@ -22,6 +23,7 @@
 #include "test_utils/test.h"
 #include "test_utils/tmp_dir.h"
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 
 #include <optional>
@@ -196,6 +198,25 @@ TEST_F_CORO(kv_index_fixture, stores_kafka_offset) {
     EXPECT_EQ(*looked_up, kafka::offset(0));
 
     co_await idx->close();
+}
+
+TEST_F_CORO(kv_index_fixture, flushes_past_its_share_of_the_shard_budget) {
+    auto opts = make_options();
+    opts.memtable_budget = 4_KiB;
+    auto idx = co_await kv_index::open(opts);
+    for (int i = 0; i < 400; ++i) {
+        auto batch = make_batch(
+          model::offset(i), {{fmt::format("key-{:064}", i), "v"}});
+        co_await idx->index_batch(batch, translator());
+    }
+
+    // close() does not flush, so what a reopen finds was flushed on the way.
+    co_await idx->close();
+    auto reopened = co_await kv_index::open(opts);
+
+    EXPECT_GE(reopened->last_applied(), model::offset(200));
+
+    co_await reopened->close();
 }
 
 } // namespace storage

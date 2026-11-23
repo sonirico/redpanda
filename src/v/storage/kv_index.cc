@@ -19,13 +19,40 @@
 #include "ssx/time.h"
 
 #include <seastar/core/byteorder.hh>
+#include <seastar/core/memory.hh>
 #include <seastar/util/file.hh>
+
+#include <algorithm>
 
 namespace storage {
 
-kv_index::kv_index(lsm::database db, model::offset last_applied)
+namespace {
+
+// Indexes of this shard that are open, sharing options::memtable_budget.
+thread_local size_t open_indexes = 0;
+
+// Below this an index would flush every few dozen entries.
+constexpr size_t min_memtable_share = 64_KiB;
+
+// Memory one memtable entry takes besides its key, measured by indexing
+// 20k and 40k single record batches with 12 and 200 byte keys.
+constexpr size_t entry_overhead = 900;
+
+} // namespace
+
+kv_index::kv_index(
+  lsm::database db, model::offset last_applied, const options& o)
   : _db(std::move(db))
-  , _last_applied(last_applied) {}
+  , _last_applied(last_applied)
+  , _memtable_budget(
+      o.memtable_budget > 0 ? o.memtable_budget
+                            : ss::memory::stats().total_memory() / 20) {
+    ++open_indexes;
+}
+
+size_t kv_index::memtable_share() const {
+    return std::max(_memtable_budget / open_indexes, min_memtable_share);
+}
 
 ss::future<std::unique_ptr<kv_index>> kv_index::open(options o) {
     lsm::options lo;
@@ -42,7 +69,7 @@ ss::future<std::unique_ptr<kv_index>> kv_index::open(options o) {
                           ? model::offset(static_cast<int64_t>((*max_seqno)()))
                           : model::offset{};
     co_return std::unique_ptr<kv_index>(
-      new kv_index(std::move(db), last_applied));
+      new kv_index(std::move(db), last_applied, o));
 }
 
 ss::future<> kv_index::index_batch(
@@ -61,6 +88,7 @@ ss::future<> kv_index::index_batch(
     }
     auto wb = _db.create_write_batch();
     size_t ops = 0;
+    size_t added = 0;
     model::offset last = _last_applied;
     src->for_each_record([&](const model::record& r) {
         if (!r.has_key()) {
@@ -82,11 +110,16 @@ ss::future<> kv_index::index_batch(
             wb.put(sv, std::move(v), lsm::sequence_number(o()));
         }
         ++ops;
+        added += k.size() + entry_overhead;
         last = o;
     });
     if (ops > 0) {
         co_await _db.apply(std::move(wb));
         _last_applied = last;
+        _unflushed_bytes += added;
+    }
+    if (_unflushed_bytes >= memtable_share()) {
+        co_await flush();
     }
 }
 
@@ -108,10 +141,12 @@ ss::future<> kv_index::flush() {
     co_await _db.flush(
       ssx::lowres_steady_clock().now()
       + ssx::duration::from_chrono(std::chrono::seconds(5)));
+    _unflushed_bytes = 0;
 }
 
 ss::future<> kv_index::close() {
     co_await _gate.close();
+    --open_indexes;
     co_await _db.close();
 }
 
