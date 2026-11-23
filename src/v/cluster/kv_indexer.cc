@@ -36,6 +36,8 @@ namespace cluster {
 
 namespace {
 
+constexpr auto lso_poll_interval = std::chrono::milliseconds(100);
+
 std::filesystem::path index_dir(const storage::ntp_config& cfg) {
     return std::filesystem::path(cfg.work_directory()) / "kv_index";
 }
@@ -181,6 +183,13 @@ ss::future<> kv_indexer::run_loop() {
                   committed, model::no_timeout, _as);
             }
             co_await index_committed();
+            if (!_caught_up) {
+                // The last stable offset is not known yet, e.g. right after
+                // a restart, and no commit has to follow to signal it.
+                co_await ss::sleep_abortable(lso_poll_interval, _as)
+                  .handle_exception([](const std::exception_ptr&) {});
+                continue;
+            }
             co_await _raft->commit_index_updated().wait(_as, [this, committed] {
                 return _raft->committed_offset() > committed;
             });
