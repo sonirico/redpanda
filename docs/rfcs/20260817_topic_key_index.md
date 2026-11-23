@@ -323,8 +323,15 @@ read may fall through to the remote read path is decided by the
   existed. It has not happened again: not in 21 more runs of the same
   load (about 2.3 million lookups), not when replaying the four boots
   that led to it with the binaries of the time and every 404 path
-  traced, not with leadership moved every 2 seconds, and not with each
-  broker frozen for 4 seconds in turn. The cause is not known. That run
+  traced, not with leadership moved every 2 seconds, not with each
+  broker frozen for 4 seconds in turn, and not with 1 MiB segments
+  being compacted and merged under the lookups. Two explanations were
+  checked against the code and do not hold: an lsm lookup racing a
+  memtable flush (the lookup reads the memtable, the frozen memtable
+  and the current version without suspending in between), and raft
+  clamping the read below an indexed offset (the last visible index is
+  never behind the commit index the indexer is bounded by). The cause
+  is not known. That run
   predates the change that answers 503 for a stale index entry, which
   was a 404 then.
 - The 503 for a stale index entry has no test: nothing available can
