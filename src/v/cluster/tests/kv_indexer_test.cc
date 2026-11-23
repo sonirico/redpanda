@@ -179,6 +179,16 @@ FIXTURE_TEST(restart_resumes_from_persisted_index, kv_indexer_fixture) {
     BOOST_REQUIRE_EQUAL(lookup(), first);
 }
 
+FIXTURE_TEST(not_caught_up_until_first_pass, kv_indexer_fixture) {
+    indexer->stop().get();
+    indexer = std::make_unique<cluster::kv_indexer>(_raft.get(), _stm);
+    BOOST_REQUIRE(!indexer->caught_up());
+
+    indexer->start().get();
+
+    RPTEST_REQUIRE_EVENTUALLY(10s, [this] { return indexer->caught_up(); });
+}
+
 FIXTURE_TEST(records_written_while_stopped_are_indexed, kv_indexer_fixture) {
     indexer->stop().get();
     auto first = write(plain_pid, 0, false, "v1");

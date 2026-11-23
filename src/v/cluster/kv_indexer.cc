@@ -123,6 +123,7 @@ bool kv_indexer::has_gap() const {
 ss::future<> kv_indexer::reset_index() {
     auto dir = index_dir(_raft->log_config());
     vlog(clusterlog.info, "[{}] rebuilding kv index at {}", _raft->ntp(), dir);
+    _caught_up = false;
     if (auto old = std::exchange(_index, nullptr)) {
         co_await old->close();
     }
@@ -182,6 +183,7 @@ ss::future<> kv_indexer::index_committed() {
     auto start = std::max(_next, log->offsets().start_offset);
     auto last = model::prev_offset(lso);
     if (start > last) {
+        _caught_up = true;
         co_return;
     }
     chunked_vector<tx::tx_range> aborted;
@@ -194,6 +196,7 @@ ss::future<> kv_indexer::index_committed() {
       index_consumer{*_index, *log->get_offset_translator_state(), aborted},
       model::no_timeout);
     _next = model::next_offset(last);
+    _caught_up = true;
 }
 
 } // namespace cluster

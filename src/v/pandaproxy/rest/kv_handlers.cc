@@ -42,6 +42,7 @@ struct kv_lookup_result {
         ok,
         not_hosted,
         not_indexed,
+        not_ready,
         not_found,
         not_local
     } status;
@@ -125,6 +126,10 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
                   co_return kv_lookup_result{
                     kv_lookup_result::status::not_indexed};
               }
+              if (!idx->caught_up()) {
+                  co_return kv_lookup_result{
+                    kv_lookup_result::status::not_ready};
+              }
               auto off = co_await idx->lookup(bytes_view(
                 reinterpret_cast<const uint8_t*>(key.data()), key.size()));
               if (!off) {
@@ -200,6 +205,11 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
     case kv_lookup_result::status::not_indexed:
         rp.rep->set_status(
           ss::http::reply::status_type::not_found, "topic not indexed");
+        break;
+    case kv_lookup_result::status::not_ready:
+        rp.rep->set_status(
+          ss::http::reply::status_type::service_unavailable,
+          "index is being built");
         break;
     case kv_lookup_result::status::not_found:
         rp.rep->set_status(ss::http::reply::status_type::not_found);

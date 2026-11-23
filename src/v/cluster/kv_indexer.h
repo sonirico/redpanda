@@ -53,6 +53,11 @@ public:
     /// below it is reflected in the index.
     model::offset next_offset() const { return _next; }
 
+    /// False from start, and from a rebuild, until a pass has read the log
+    /// up to the last stable offset. Until then lookups miss keys that the
+    /// log does hold.
+    bool caught_up() const { return _caught_up; }
+
     static ss::future<> remove_index(const storage::ntp_config&);
 
 private:
@@ -68,6 +73,7 @@ private:
     ss::shared_ptr<rm_stm> _rm_stm;
     std::unique_ptr<storage::kv_index> _index;
     model::offset _next;
+    bool _caught_up{false};
     ss::abort_source _as;
     ss::gate _gate;
 };
