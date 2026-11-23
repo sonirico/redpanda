@@ -14,6 +14,7 @@
 #include "base/seastarx.h"
 #include "bytes/bytes.h"
 #include "cluster/fwd.h"
+#include "metrics/metrics.h"
 #include "model/fundamental.h"
 #include "raft/fwd.h"
 #include "storage/fwd.h"
@@ -61,6 +62,7 @@ public:
     static ss::future<> remove_index(const storage::ntp_config&);
 
 private:
+    void setup_metrics();
     ss::future<> run_loop();
     ss::future<> index_committed();
     /// The log start moved past records that were never indexed (snapshot
@@ -74,8 +76,10 @@ private:
     std::unique_ptr<storage::kv_index> _index;
     model::offset _next;
     bool _caught_up{false};
+    uint64_t _rebuilds{0};
     ss::abort_source _as;
     ss::gate _gate;
+    metrics::internal_metric_groups _metrics;
 };
 
 } // namespace cluster

@@ -13,7 +13,9 @@
 
 #include "cluster/logger.h"
 #include "cluster/rm_stm.h"
+#include "config/configuration.h"
 #include "container/chunked_vector.h"
+#include "metrics/prometheus_sanitize.h"
 #include "model/record.h"
 #include "model/record_batch_reader.h"
 #include "model/timeout_clock.h"
@@ -23,6 +25,7 @@
 #include "storage/log.h"
 #include "storage/types.h"
 
+#include <seastar/core/metrics.hh>
 #include <seastar/core/sleep.hh>
 
 #include <algorithm>
@@ -88,7 +91,36 @@ ss::future<> kv_indexer::start() {
       _raft->ntp(),
       dir,
       _next);
+    setup_metrics();
     ssx::spawn_with_gate(_gate, [this] { return run_loop(); });
+}
+
+void kv_indexer::setup_metrics() {
+    if (config::shard_local_cfg().disable_metrics()) {
+        return;
+    }
+    namespace sm = ss::metrics;
+    const auto& ntp = _raft->ntp();
+    const std::vector<sm::label_instance> labels = {
+      metrics::namespace_label(ntp.ns()),
+      metrics::topic_label(ntp.tp.topic()),
+      metrics::partition_label(ntp.tp.partition()),
+    };
+    _metrics.add_group(
+      prometheus_sanitize::metrics_name("cluster:kv_index"),
+      {sm::make_gauge(
+         "next_offset",
+         [this] { return _next; },
+         sm::description(
+           "Log offset the next indexing pass starts from. The distance to "
+           "the last stable offset of the partition is the indexing lag."),
+         labels),
+       sm::make_counter(
+         "rebuilds",
+         [this] { return _rebuilds; },
+         sm::description(
+           "Number of times the index was dropped and rebuilt from the log."),
+         labels)});
 }
 
 ss::future<> kv_indexer::stop() {
@@ -124,6 +156,7 @@ ss::future<> kv_indexer::reset_index() {
     auto dir = index_dir(_raft->log_config());
     vlog(clusterlog.info, "[{}] rebuilding kv index at {}", _raft->ntp(), dir);
     _caught_up = false;
+    ++_rebuilds;
     if (auto old = std::exchange(_index, nullptr)) {
         co_await old->close();
     }
