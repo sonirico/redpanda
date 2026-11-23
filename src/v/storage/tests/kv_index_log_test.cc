@@ -26,10 +26,10 @@
 
 namespace {
 
-model::record_batch
-make_keyed_batch(std::string_view key, std::string_view value) {
+model::record_batch make_keyed_batch(
+  model::offset offset, std::string_view key, std::string_view value) {
     storage::record_batch_builder builder(
-      model::record_batch_type::raft_data, model::offset(0));
+      model::record_batch_type::raft_data, offset);
     iobuf k;
     k.append(key.data(), key.size());
     iobuf v;
@@ -72,8 +72,8 @@ TEST_F(kv_index_log_fixture, log_with_override_indexes_appends) {
     ASSERT_TRUE(b.get_log()->notify_kv_index_update().get());
     ASSERT_NE(b.get_log()->get_kv_index(), nullptr);
 
-    b.add_batch(make_keyed_batch("k", "v1")).get();
-    b.add_batch(make_keyed_batch("k", "v2")).get();
+    b.add_batch(make_keyed_batch(model::offset(0), "k", "v1")).get();
+    b.add_batch(make_keyed_batch(model::offset(1), "k", "v2")).get();
 
     auto looked_up
       = b.get_log()->get_kv_index()->lookup(to_bytes_view("k")).get();
@@ -120,7 +120,7 @@ TEST_F(kv_index_log_fixture, reopen_resumes_from_last_applied) {
     b.start(make_compacted_kv_config(ntp, base_dir)).get();
     b.get_log()->notify_kv_index_update().get();
 
-    b.add_batch(make_keyed_batch("k", "v1")).get();
+    b.add_batch(make_keyed_batch(model::offset(0), "k", "v1")).get();
 
     b.stop().get();
     b.start(make_compacted_kv_config(ntp, base_dir)).get();
@@ -139,9 +139,9 @@ TEST_F(kv_index_log_fixture, truncate_rebuilds) {
     b.start(make_compacted_kv_config(ntp, b.get_log_config().base_dir)).get();
     b.get_log()->notify_kv_index_update().get();
 
-    b.add_batch(make_keyed_batch("k0", "v0")).get();
-    b.add_batch(make_keyed_batch("k1", "v1")).get();
-    b.add_batch(make_keyed_batch("k2", "v2")).get();
+    b.add_batch(make_keyed_batch(model::offset(0), "k0", "v0")).get();
+    b.add_batch(make_keyed_batch(model::offset(1), "k1", "v1")).get();
+    b.add_batch(make_keyed_batch(model::offset(2), "k2", "v2")).get();
 
     b.truncate(model::offset(1)).get();
 

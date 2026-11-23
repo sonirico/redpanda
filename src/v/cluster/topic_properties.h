@@ -189,10 +189,6 @@ struct topic_properties
     // has_overrides/describe treat nullopt as unset.
     std::optional<pandaproxy::schema_registry::context> schema_registry_context;
 
-    // Whether the broker maintains a key index for this compacted topic,
-    // served by the Pandaproxy GET /kv/{topic}/{key} endpoint.
-    std::optional<bool> kv_index_enabled;
-
     std::optional<bool> record_key_schema_id_validation;
     std::optional<bool> record_key_schema_id_validation_compat;
     std::optional<pandaproxy::schema_registry::subject_name_strategy>
@@ -252,6 +248,10 @@ struct topic_properties
     // Storage mode for the topic: local, tiered, or cloud
     model::redpanda_storage_mode storage_mode{
       storage::ntp_config::default_storage_mode};
+
+    // Whether the broker maintains a key index for this compacted topic,
+    // served by the Pandaproxy GET /kv/{topic}/{key} endpoint.
+    std::optional<bool> kv_index_enabled;
 
     bool is_local_topic() const;
 

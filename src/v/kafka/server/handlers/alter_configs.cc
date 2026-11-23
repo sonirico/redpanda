@@ -22,7 +22,6 @@
 #include "kafka/server/handlers/configs/storage_mode_properties.h"
 #include "kafka/server/handlers/details/alter_config_utils.h"
 #include "kafka/server/handlers/topics/types.h"
-#include "kafka/server/handlers/topics/validators.h"
 #include "kafka/server/request_context.h"
 #include "kafka/server/response.h"
 #include "model/fundamental.h"
@@ -501,7 +500,9 @@ create_topic_properties_update(
                       alter_configs_resource_response>(
                       resource,
                       error_code::invalid_config,
-                      kv_index_create_validator::error_message);
+                      "redpanda.kv.index.enabled requires the kv_index feature "
+                      "and "
+                      "the kv_index_enabled cluster property");
                 }
                 continue;
             }

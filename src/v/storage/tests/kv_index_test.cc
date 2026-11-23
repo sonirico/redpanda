@@ -82,7 +82,7 @@ TEST_F_CORO(kv_index_fixture, put_and_lookup) {
     co_await idx->index_batch(batch, translator());
 
     auto looked_up = co_await idx->lookup(to_bytes_view("k"));
-    ASSERT_TRUE(looked_up.has_value());
+    ASSERT_TRUE_CORO(looked_up.has_value());
     EXPECT_EQ(*looked_up, kafka::offset(0));
     EXPECT_EQ(idx->last_applied(), model::offset(0));
 
@@ -97,7 +97,7 @@ TEST_F_CORO(kv_index_fixture, latest_wins) {
     co_await idx->index_batch(batch1, translator());
 
     auto looked_up = co_await idx->lookup(to_bytes_view("k"));
-    ASSERT_TRUE(looked_up.has_value());
+    ASSERT_TRUE_CORO(looked_up.has_value());
     EXPECT_EQ(*looked_up, kafka::offset(1));
 
     co_await idx->close();
@@ -126,7 +126,7 @@ TEST_F_CORO(kv_index_fixture, null_key_skipped) {
     co_await idx->index_batch(batch, translator());
 
     auto looked_up = co_await idx->lookup(to_bytes_view("k"));
-    ASSERT_TRUE(looked_up.has_value());
+    ASSERT_TRUE_CORO(looked_up.has_value());
     EXPECT_EQ(*looked_up, kafka::offset(11));
     EXPECT_EQ(idx->last_applied(), model::offset(11));
 
@@ -143,7 +143,7 @@ TEST_F_CORO(kv_index_fixture, redelivery_ignored) {
     EXPECT_EQ(idx->last_applied(), last_applied_after_first);
 
     auto looked_up = co_await idx->lookup(to_bytes_view("k"));
-    ASSERT_TRUE(looked_up.has_value());
+    ASSERT_TRUE_CORO(looked_up.has_value());
     EXPECT_EQ(*looked_up, kafka::offset(0));
 
     co_await idx->close();
@@ -161,7 +161,7 @@ TEST_F_CORO(kv_index_fixture, reopen_keeps_last_applied) {
     EXPECT_EQ(reopened->last_applied(), model::offset(0));
 
     auto looked_up = co_await reopened->lookup(to_bytes_view("k"));
-    ASSERT_TRUE(looked_up.has_value());
+    ASSERT_TRUE_CORO(looked_up.has_value());
     EXPECT_EQ(*looked_up, kafka::offset(0));
 
     co_await reopened->close();
@@ -171,11 +171,11 @@ TEST_F_CORO(kv_index_fixture, compressed_batch_indexed) {
     auto idx = co_await kv_index::open(make_options());
     auto batch = make_batch(
       model::offset(0), {{"k", "v1"}}, model::compression::zstd);
-    ASSERT_TRUE(batch.compressed());
+    ASSERT_TRUE_CORO(batch.compressed());
     co_await idx->index_batch(batch, translator());
 
     auto looked_up = co_await idx->lookup(to_bytes_view("k"));
-    ASSERT_TRUE(looked_up.has_value());
+    ASSERT_TRUE_CORO(looked_up.has_value());
     EXPECT_EQ(*looked_up, kafka::offset(0));
 
     co_await idx->close();
@@ -192,7 +192,7 @@ TEST_F_CORO(kv_index_fixture, stores_kafka_offset) {
     co_await idx->index_batch(batch, ot);
 
     auto looked_up = co_await idx->lookup(to_bytes_view("k"));
-    ASSERT_TRUE(looked_up.has_value());
+    ASSERT_TRUE_CORO(looked_up.has_value());
     EXPECT_EQ(*looked_up, kafka::offset(0));
 
     co_await idx->close();

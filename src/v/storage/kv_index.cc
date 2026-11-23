@@ -38,9 +38,9 @@ ss::future<std::unique_ptr<kv_index>> kv_index::open(options o) {
     };
     auto db = co_await lsm::database::open(std::move(lo), std::move(p));
     auto max_seqno = db.max_applied_seqno();
-    auto last_applied = max_seqno ? model::offset(
-                                      static_cast<int64_t>(max_seqno->value()))
-                                  : model::offset{};
+    auto last_applied = max_seqno
+                          ? model::offset(static_cast<int64_t>((*max_seqno)()))
+                          : model::offset{};
     co_return std::unique_ptr<kv_index>(
       new kv_index(std::move(db), last_applied));
 }

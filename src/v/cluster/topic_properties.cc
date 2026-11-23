@@ -371,6 +371,7 @@ adl<cluster::topic_properties>::from(iobuf_parser& parser) {
       std::nullopt,
       std::nullopt,
       model::redpanda_storage_mode::local,
+      std::nullopt,
     };
 }
 

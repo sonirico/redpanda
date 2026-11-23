@@ -17,8 +17,7 @@
 #include "cluster/topic_table.h"
 #include "config/configuration.h"
 #include "config/rest_authn_endpoint.h"
-#include "kafka/client/partitioners.h"
-#include "kafka/client/types.h"
+#include "hashing/murmur.h"
 #include "kafka/data/partition_proxy.h"
 #include "model/batch_compression.h"
 #include "model/metadata.h"
@@ -96,16 +95,13 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
     }
 
     if (!partition) {
-        kafka::client::record_essence re;
-        re.key = iobuf::from(key);
-        auto p = kafka::client::murmur2_key_partitioner()(
-          re, md->get().get_assignments().size());
-        if (!p) {
+        if (key.empty()) {
             rp.rep->set_status(
               ss::http::reply::status_type::bad_request, "empty key");
             co_return std::move(rp);
         }
-        partition = *p;
+        partition = model::partition_id(
+          murmur2(key.data(), key.size()) % md->get().get_assignments().size());
     }
 
     model::ntp ntp{model::kafka_namespace, topic, *partition};
@@ -155,11 +151,11 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
                 std::move(rdr.reader), model::no_timeout);
 
               for (auto& batch : batches) {
-                  model::record_batch decompressed;
+                  std::optional<model::record_batch> decompressed;
                   const model::record_batch* target = &batch;
                   if (batch.compressed()) {
                       decompressed = co_await model::decompress_batch(batch);
-                      target = &decompressed;
+                      target = &*decompressed;
                   }
                   std::optional<model::record> found;
                   target->for_each_record([&](model::record r) {
