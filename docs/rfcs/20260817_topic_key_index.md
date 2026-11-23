@@ -320,14 +320,13 @@ read may fall through to the remote read path is decided by the
   with produce load.
 - One run of 16 concurrent lookup threads against a topic being
   rewritten got 2528 empty 404 answers out of 107117 for keys that
-  existed. Nine more runs replaying the same sequence of restarts, and
-  then 12 cycles of restart plus load (1.57 million lookups), got none.
-  The cause is not known. That run predates the change that answers 503
-  for a stale index entry, which was a 404 then. Replaying the four
-  boots that led to it with the binaries of the time, traced on every
-  path that answers 404, got none either; nor did that replay show the
-  503 after an idle restart that the same data directory had shown
-  twice, so whatever state it was in was not recreated.
+  existed. It has not happened again: not in 21 more runs of the same
+  load (about 2.3 million lookups), not when replaying the four boots
+  that led to it with the binaries of the time and every 404 path
+  traced, not with leadership moved every 2 seconds, and not with each
+  broker frozen for 4 seconds in turn. The cause is not known. That run
+  predates the change that answers 503 for a stale index entry, which
+  was a 404 then.
 - The 503 for a stale index entry has no test: nothing available can
   hold the indexer back while compaction runs.
 - Tiered storage is covered in process, against the S3 imposter the
