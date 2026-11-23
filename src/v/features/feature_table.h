@@ -597,7 +597,7 @@ inline constexpr std::array feature_schema{
     feature_spec::available_policy::always,
     feature_spec::prepare_policy::always},
   feature_spec{
-    release_version::v26_2_1,
+    release_version::v26_3_1,
     "kv_index",
     feature::kv_index,
     feature_spec::available_policy::always,
