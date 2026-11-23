@@ -146,8 +146,12 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
                     kv_lookup_result::status::not_local};
               }
               auto proxy = kafka::make_partition_proxy(p);
-              auto rdr = co_await proxy.make_reader(
-                kafka::log_reader_config(koff, koff, std::nullopt));
+              kafka::log_reader_config reader_cfg(koff, koff, std::nullopt);
+              // A lookup is not followed by a read of the next offset, so a
+              // cached reader would never be reused and would push out the
+              // readers of consumers.
+              reader_cfg.skip_readers_cache = true;
+              auto rdr = co_await proxy.make_reader(reader_cfg);
               auto batches = co_await model::consume_reader_to_memory(
                 std::move(rdr.reader), model::no_timeout);
 

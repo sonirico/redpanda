@@ -38,7 +38,7 @@ storage::local_log_reader_config kafka_to_local_log_reader_config(
     auto max_offset = ot_state->to_log_offset(
       kafka::offset_cast(cfg.max_offset));
 
-    return storage::local_log_reader_config(
+    storage::local_log_reader_config local_cfg(
       /*start_offset=*/start_offset,
       /*max_offset=*/max_offset,
       /*max_bytes=*/cfg.max_bytes,
@@ -47,6 +47,8 @@ storage::local_log_reader_config kafka_to_local_log_reader_config(
       /*abort_source=*/cfg.abort_source,
       /*client_address=*/cfg.client_address,
       /*strict_max_bytes=*/cfg.strict_max_bytes);
+    local_cfg.skip_readers_cache = cfg.skip_readers_cache;
+    return local_cfg;
 }
 
 cloud_storage::cloud_log_reader_config
