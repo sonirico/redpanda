@@ -557,6 +557,11 @@ bool partition::kv_index_wanted() const {
 ss::future<> partition::start_kv_indexer() {
     auto indexer = std::make_unique<cluster::kv_indexer>(_raft.get(), _rm_stm);
     co_await indexer->start();
+    if (_as.abort_requested()) {
+        // stop() ran while the index was opening and did not see it.
+        co_await indexer->stop();
+        co_return;
+    }
     _kv_indexer = std::move(indexer);
 }
 
