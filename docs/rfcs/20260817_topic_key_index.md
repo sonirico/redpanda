@@ -317,6 +317,10 @@ read may fall through to the remote read path is decided by the
   addition to, the Pandaproxy REST endpoint.
 - Scale: one `lsm::database` per indexed partition was exercised with
   1000 partitions per shard, not more, and only for memory.
+- Load on the final code: 40 cycles of restarting three brokers and
+  rewriting a 400k key topic three times under 16 lookup clients, 5.4
+  million lookups, every answer 200 with a value some write gave that
+  key.
 - Lookup latency has one data point: a release build, three brokers
   with one core each on one machine, one partition holding 400k keys,
   one client sending 40k lookups for random keys over a single
