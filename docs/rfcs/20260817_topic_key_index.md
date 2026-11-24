@@ -326,23 +326,18 @@ read may fall through to the remote read path is decided by the
   one client sending 40k lookups for random keys over a single
   connection. Median 0.64 ms, p99 0.95 ms. Nothing under concurrency or
   with produce load.
-- One run of 16 concurrent lookup threads against a topic being
-  rewritten got 2528 empty 404 answers out of 107117 for keys that
-  existed. It has not happened again: not in 21 more runs of the same
-  load (about 2.3 million lookups), not when replaying the four boots
-  that led to it with the binaries of the time and every 404 path
-  traced, not with leadership moved every 2 seconds, not with each
-  broker frozen for 4 seconds in turn, and not with 1 MiB segments
-  being compacted and merged under the lookups, with or without the
-  log's readers cache in the read path. Two explanations were checked
-  against the code and do not hold: an lsm lookup racing a
-  memtable flush (the lookup reads the memtable, the frozen memtable
-  and the current version without suspending in between), and raft
-  clamping the read below an indexed offset (the last visible index is
-  never behind the commit index the indexer is bounded by). The cause
-  is not known. That run
-  predates the change that answers 503 for a stale index entry, which
-  was a 404 then.
+- Resolved: lookups answered an empty 404 for keys the log holds after
+  a broker was stopped while its index was compacting. An aborted lsm
+  compaction returned its edit as if it had finished, and the edit
+  deleted every input file while the outputs held only the keys copied
+  so far. The index reopened with a contiguous key range missing and
+  its last applied offset intact, so nothing rebuilt it. It reproduced
+  on every attempt by restarting three brokers right after building the
+  index on a 400k key topic: 7094 of 108914 lookups answered 404, all
+  on the index miss path. `lsm/db` now fails an aborted compaction
+  (unit test in `compaction_task_test`); the same sequence run three
+  times afterwards answered 200 to all 315081 lookups. Only a clean
+  stop during a compaction was exercised, not a crash.
 - The 503 for a stale index entry is tested by staging it: an open
   transaction holds the indexer back and compaction is run by hand past
   the last stable offset. Whether the broker can get there on its own,
