@@ -237,6 +237,12 @@ ss::future<ss::lw_shared_ptr<version_edit>> do_run_compaction_task(
     } catch (...) {
         state.err = std::current_exception();
     }
+    if (!state.err && as->abort_requested()) {
+        // The inputs were not read to the end: the edit would delete all of
+        // them while the outputs hold only the keys copied so far.
+        state.err = std::make_exception_ptr(
+          abort_requested_exception("shutdown requested during compaction"));
+    }
     co_await state.finish();
     auto edit = compaction->edit();
     compaction->add_input_deletions(edit.get());

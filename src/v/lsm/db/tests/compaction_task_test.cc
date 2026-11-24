@@ -10,6 +10,7 @@
  */
 
 #include "bytes/iobuf.h"
+#include "lsm/core/exceptions.h"
 #include "lsm/core/internal/files.h"
 #include "lsm/core/internal/options.h"
 #include "lsm/db/compaction_task.h"
@@ -203,4 +204,26 @@ TEST_F(CompactionTaskTest, InFlightOutputWriterClosedWhenAppendFails) {
     ASSERT_TRUE(w.appended);
     EXPECT_TRUE(w.closed);
     EXPECT_FALSE(w.destroyed_without_close);
+}
+
+// An aborted compaction has not read its inputs to the end. An edit built
+// from it would delete every input file while its outputs hold only the keys
+// copied so far, so the task must fail instead of returning one.
+TEST_F(CompactionTaskTest, AbortedCompactionReturnsNoEdit) {
+    add_sst(
+      {.id = 1_file_id, .level = 0_level, .keys = {"d@1"_key, "e@1"_key}});
+    add_sst(
+      {.id = 10_file_id, .level = 1_level, .keys = {"a@1"_key, "z@1"_key}});
+    auto maybe_c = version_set().pick_compaction();
+    ASSERT_TRUE(maybe_c);
+    auto& c = *maybe_c;
+    ASSERT_FALSE(c->is_trivial_move());
+    ss::abort_source as;
+    as.request_abort_ex(lsm::abort_requested_exception("database closing"));
+
+    EXPECT_THROW(
+      run_compaction_task(
+        &faults(), &_snapshots, &version_set(), _options, c.get(), &as)
+        .get(),
+      lsm::abort_requested_exception);
 }
