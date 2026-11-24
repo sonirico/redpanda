@@ -333,19 +333,21 @@ read may fall through to the remote read path is decided by the
   0.87/4.1 ms, 0.87/4.9 ms, 2.8/9.3 ms and 11/30 ms. Throughput levels
   off near 6500 lookups per second from 16 clients on; how much of
   that is the client was not separated. No run on separate hosts.
-- Resolved: lookups answered an empty 404 for keys the log holds after
-  a broker was stopped while its index was compacting. An aborted lsm
-  compaction returned its edit as if it had finished, and the edit
+- Needs a separate `lsm/db` fix: lookups answer an empty 404 for keys the log holds after
+  a broker is stopped while its index is compacting. An aborted lsm
+  compaction returns its edit as if it had finished, and the edit
   deleted every input file while the outputs held only the keys copied
   so far. The index reopened with a contiguous key range missing and
   its last applied offset intact, so nothing rebuilt it. It reproduced
   on every attempt by restarting three brokers right after building the
   index on a 400k key topic: 7094 of 108914 lookups answered 404, all
-  on the index miss path. `lsm/db` now fails an aborted compaction
-  (unit test in `compaction_task_test`); the same sequence run three
-  times afterwards answered 200 to all 315081 lookups, and so did
-  three more runs that killed the brokers with SIGKILL instead (315629
-  lookups).
+  on the index miss path. The fix makes `lsm/db` fail an aborted
+  compaction (unit test in `compaction_task_test`). It is not part of
+  this change because it touches code shared with cloud topics; it is
+  proposed on its own. With it applied, the same sequence run three
+  times answered 200 to all 315081 lookups, and so did three more runs
+  that killed the brokers with SIGKILL instead (315629 lookups). The
+  scale, load and latency figures above were measured with it applied.
 - The 503 for a stale index entry is tested by staging it: an open
   transaction holds the indexer back and compaction is run by hand past
   the last stable offset. The broker did not get there on its own in
