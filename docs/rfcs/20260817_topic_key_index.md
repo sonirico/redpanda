@@ -316,16 +316,23 @@ read may fall through to the remote read path is decided by the
 - Exposing the index lookup over the Kafka protocol instead of, or in
   addition to, the Pandaproxy REST endpoint.
 - Scale: one `lsm::database` per indexed partition was exercised with
-  1000 partitions per shard, not more, and only for memory.
+  2000 partitions on one shard of a 4 GiB broker, which is as many as
+  the broker's own memory limit admits there (6291 replicas across
+  three brokers). 851 MiB allocated with the indexes empty against 822
+  MiB for the same topic without them, 1046 MiB after 200k keys.
+  Shards with more memory and more partitions were not tried.
 - Load on the final code: 40 cycles of restarting three brokers and
-  rewriting a 400k key topic three times under 16 lookup clients, 5.4
+  rewriting a 400k key topic three times under 16 lookup clients, 5.3
   million lookups, every answer 200 with a value some write gave that
   key.
-- Lookup latency has one data point: a release build, three brokers
-  with one core each on one machine, one partition holding 400k keys,
-  one client sending 40k lookups for random keys over a single
-  connection. Median 0.64 ms, p99 0.95 ms. Nothing under concurrency or
-  with produce load.
+- Lookup latency was measured on one machine only: a release build,
+  three brokers with one core each, one partition holding 400k keys,
+  random keys, Python clients with one connection each. Median and p99
+  with 1, 4, 16 and 64 clients: 0.64/0.97 ms, 0.81/1.7 ms, 2.5/4.6 ms
+  and 9.0/28 ms. With the topic being rewritten at the same time:
+  0.87/4.1 ms, 0.87/4.9 ms, 2.8/9.3 ms and 11/30 ms. Throughput levels
+  off near 6500 lookups per second from 16 clients on; how much of
+  that is the client was not separated. No run on separate hosts.
 - Resolved: lookups answered an empty 404 for keys the log holds after
   a broker was stopped while its index was compacting. An aborted lsm
   compaction returned its edit as if it had finished, and the edit
@@ -341,8 +348,9 @@ read may fall through to the remote read path is decided by the
   lookups).
 - The 503 for a stale index entry is tested by staging it: an open
   transaction holds the indexer back and compaction is run by hand past
-  the last stable offset. Whether the broker can get there on its own,
-  with an indexer that lags by a segment roll, has not been observed.
+  the last stable offset. The broker did not get there on its own in
+  635211 lookups against a topic with 1 MiB segments rewritten nonstop
+  and compaction running every 200 ms. The path stays as a guard.
 - Tiered storage is covered twice: in process, against the S3 imposter
   the repository uses for its own tests, and by the ducktape tests on
   three brokers with a real S3 endpoint (SeaweedFS, since MinIO no
