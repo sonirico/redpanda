@@ -8,14 +8,16 @@
 # by the Apache License, Version 2.0
 
 import requests
+from ducktape.cluster.cluster import ClusterNode
 from ducktape.tests.test import TestContext
 from ducktape.utils.util import wait_until
 
-from rptest.clients.rpk import RpkTool
+from rptest.clients.rpk import RpkException, RpkTool
 from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
 from rptest.services.redpanda import PandaproxyConfig, SISettings
 from rptest.tests.redpanda_test import RedpandaTest
+from rptest.util import expect_exception
 
 PANDAPROXY_PORT = 8082
 TOPIC = "kv-index-test"
@@ -106,6 +108,46 @@ class KvIndexTest(RedpandaTest):
         self.redpanda.restart_nodes(self.redpanda.nodes)
 
         self._wait_lookup(TOPIC, "k", 200, b"v")
+
+    def _feature_state(self, node: ClusterNode) -> str:
+        features = Admin(self.redpanda).get_features(node=node)["features"]
+        return next(f["state"] for f in features if f["name"] == "kv_index")
+
+    def _set_feature(self, state: str) -> None:
+        Admin(self.redpanda).put_feature("kv_index", {"state": state})
+        wait_until(
+            lambda: all(self._feature_state(n) == state for n in self.redpanda.nodes),
+            timeout_sec=30,
+            backoff_sec=1,
+        )
+
+    @cluster(num_nodes=3)
+    def test_property_rejected_while_feature_inactive(self) -> None:
+        """
+        During an upgrade the feature is inactive until every broker runs the
+        new version. The property must not be settable in that window.
+        """
+        rpk = RpkTool(self.redpanda)
+        rpk.create_topic(
+            TOPIC, partitions=1, replicas=3, config={"cleanup.policy": "compact"}
+        )
+        self._set_feature("disabled")
+
+        with expect_exception(RpkException, lambda e: "INVALID_CONFIG" in str(e)):
+            rpk.create_topic(
+                "kv-index-gated",
+                partitions=1,
+                replicas=3,
+                config={
+                    "cleanup.policy": "compact",
+                    "redpanda.kv.index.enabled": "true",
+                },
+            )
+        with expect_exception(RpkException, lambda e: "INVALID_CONFIG" in str(e)):
+            rpk.alter_topic_config(TOPIC, "redpanda.kv.index.enabled", "true")
+
+        self._set_feature("active")
+        rpk.alter_topic_config(TOPIC, "redpanda.kv.index.enabled", "true")
 
 
 class KvIndexTieredTest(RedpandaTest):
