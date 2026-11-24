@@ -336,8 +336,9 @@ read may fall through to the remote read path is decided by the
   index on a 400k key topic: 7094 of 108914 lookups answered 404, all
   on the index miss path. `lsm/db` now fails an aborted compaction
   (unit test in `compaction_task_test`); the same sequence run three
-  times afterwards answered 200 to all 315081 lookups. Only a clean
-  stop during a compaction was exercised, not a crash.
+  times afterwards answered 200 to all 315081 lookups, and so did
+  three more runs that killed the brokers with SIGKILL instead (315629
+  lookups).
 - The 503 for a stale index entry is tested by staging it: an open
   transaction holds the indexer back and compaction is run by hand past
   the last stable offset. Whether the broker can get there on its own,
