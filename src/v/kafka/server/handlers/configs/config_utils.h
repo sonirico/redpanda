@@ -283,6 +283,20 @@ struct iceberg_config_validator {
     }
 };
 
+struct kv_index_enabled_validator {
+    bool feature_active = false;
+    std::optional<ss::sstring>
+    operator()(const ss::sstring&, const bool& enabled) {
+        if (
+          enabled
+          && (!feature_active || !config::shard_local_cfg().kv_index_enabled())) {
+            return "redpanda.kv.index.enabled requires the kv_index feature "
+                   "and the kv_index_enabled cluster property";
+        }
+        return std::nullopt;
+    }
+};
+
 struct delete_retention_ms_validator {
     std::optional<ss::sstring> operator()(
       const ss::sstring&,
@@ -614,10 +628,12 @@ inline void parse_and_set_optional_duration(
     }
 }
 
-inline void parse_and_set_optional_bool_alpha(
+template<typename Validator = noop_validator<bool>>
+void parse_and_set_optional_bool_alpha(
   cluster::property_update<std::optional<bool>>& property,
   const std::optional<ss::sstring>& value,
-  config_resource_operation op) {
+  config_resource_operation op,
+  Validator validator = noop_validator<bool>{}) {
     // remove property value
     if (op == config_resource_operation::remove) {
         property.op = cluster::incremental_update_operation::remove;
@@ -625,14 +641,20 @@ inline void parse_and_set_optional_bool_alpha(
     }
     // set property value if preset, otherwise do nothing
     if (op == config_resource_operation::set && value) {
+        bool parsed = false;
         try {
-            property.value = string_switch<bool>(*value)
-                               .match("true", true)
-                               .match("false", false);
+            parsed = string_switch<bool>(*value)
+                       .match("true", true)
+                       .match("false", false);
         } catch (const std::runtime_error&) {
             // Our callers expect this exception type on malformed values
             throw boost::bad_lexical_cast();
         }
+        auto v_error = validator(*value, parsed);
+        if (v_error) {
+            throw validation_error(*v_error);
+        }
+        property.value = parsed;
         property.op = cluster::incremental_update_operation::set;
         return;
     }

@@ -466,20 +466,12 @@ create_topic_properties_update(
             }
             if (cfg.name == topic_property_kv_index_enabled) {
                 parse_and_set_optional_bool_alpha(
-                  update.properties.kv_index_enabled, cfg.value, op);
-                if (
-                  update.properties.kv_index_enabled.value.value_or(false)
-                  && (!ctx.feature_table().local().is_active(
-                        features::feature::kv_index)
-                      || !config::shard_local_cfg().kv_index_enabled())) {
-                    return make_error_alter_config_resource_response<
-                      resp_resource_t>(
-                      resource,
-                      error_code::invalid_config,
-                      "redpanda.kv.index.enabled requires the kv_index feature "
-                      "and "
-                      "the kv_index_enabled cluster property");
-                }
+                  update.properties.kv_index_enabled,
+                  cfg.value,
+                  op,
+                  kv_index_enabled_validator{
+                    ctx.feature_table().local().is_active(
+                      features::feature::kv_index)});
                 continue;
             }
 

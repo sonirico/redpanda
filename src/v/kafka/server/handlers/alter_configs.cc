@@ -490,20 +490,10 @@ create_topic_properties_update(
                 parse_and_set_optional_bool_alpha(
                   update.properties.kv_index_enabled,
                   cfg.value,
-                  kafka::config_resource_operation::set);
-                if (
-                  update.properties.kv_index_enabled.value.value_or(false)
-                  && (!ctx.feature_table().local().is_active(
-                        features::feature::kv_index)
-                      || !config::shard_local_cfg().kv_index_enabled())) {
-                    return make_error_alter_config_resource_response<
-                      alter_configs_resource_response>(
-                      resource,
-                      error_code::invalid_config,
-                      "redpanda.kv.index.enabled requires the kv_index feature "
-                      "and "
-                      "the kv_index_enabled cluster property");
-                }
+                  kafka::config_resource_operation::set,
+                  kv_index_enabled_validator{
+                    ctx.feature_table().local().is_active(
+                      features::feature::kv_index)});
                 continue;
             }
 
