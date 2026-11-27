@@ -9,6 +9,7 @@ redpanda_cc_library(
         "iceberg_handlers.cc",
         "kv_handlers.cc",
         "proxy.cc",
+        "topic_authorizer.cc",
     ],
     hdrs = [
         "api.h",
@@ -18,6 +19,7 @@ redpanda_cc_library(
         "iceberg_handlers.h",
         "kv_handlers.h",
         "proxy.h",
+        "topic_authorizer.h",
     ],
     implementation_deps = [
         "//src/v/cluster:controller_log_limiter",
@@ -46,6 +48,7 @@ redpanda_cc_library(
         "//src/v/cluster:shard_table",
         "//src/v/cluster:topic_table",
         "//src/v/config",
+        "//src/v/container:chunked_vector",
         "//src/v/datalake:table_id_provider",
         "//src/v/datalake/coordinator:frontend",
         "//src/v/datalake/coordinator:model",

@@ -27,9 +27,8 @@
 #include "pandaproxy/json/rjson_util.h"
 #include "pandaproxy/logger.h"
 #include "pandaproxy/parsing/httpd.h"
+#include "pandaproxy/rest/topic_authorizer.h"
 #include "security/acl.h"
-#include "security/authorizer.h"
-#include "security/request_auth.h"
 #include "storage/log.h"
 #include "storage/translating_reader.h"
 
@@ -61,23 +60,8 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
       *rq.req, "partition");
 
     if (rq.authn_method != config::rest_authn_method::none) {
-        auto auth_result = rq.context().authenticator.authenticate(*rq.req);
-        auth_result.pass();
-        auto principal = security::acl_principal{
-          security::principal_type::user, rq.user.name};
-        auto host = security::acl_host{rq.req->get_client_address().addr()};
-        auto& groups = auth_result.get_groups();
-        auto is_authorized = rq.service()
-                               .authorizer()
-                               .authorized(
-                                 topic,
-                                 security::acl_operation::read,
-                                 principal,
-                                 host,
-                                 security::superuser_required::no,
-                                 groups)
-                               .is_authorized();
-        if (!is_authorized) {
+        topic_authorizer authorizer(rq, security::acl_operation::read);
+        if (!authorizer.authorized(topic)) {
             rp.rep->set_status(ss::http::reply::status_type::forbidden);
             co_return std::move(rp);
         }
@@ -94,11 +78,6 @@ get_kv(proxy::server::request_t rq, proxy::server::reply_t rp) {
     }
 
     if (!partition) {
-        if (key.empty()) {
-            rp.rep->set_status(
-              ss::http::reply::status_type::bad_request, "empty key");
-            co_return std::move(rp);
-        }
         // Same as the default partitioner of the Java client, librdkafka's
         // murmur2 and franz-go: the sign bit is cleared before the modulo.
         partition = model::partition_id(
