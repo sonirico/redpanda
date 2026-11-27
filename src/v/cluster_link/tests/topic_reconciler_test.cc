@@ -282,6 +282,22 @@ TEST_F_CORO(topic_reconciler_test, storage_mode_update_gated_until_upgrade) {
     co_return;
 }
 
+TEST_F_CORO(topic_reconciler_test, kv_index_enabled_is_mirrored) {
+    cluster::topic_configuration cfg(
+      ::model::kafka_namespace, ::model::topic("mirror"), 1, 1);
+    cluster::topic_properties_update update(
+      {::model::kafka_namespace, ::model::topic("mirror")});
+
+    EXPECT_TRUE(
+      utils::maybe_append_update(
+        update,
+        ss::sstring{kafka::topic_property_kv_index_enabled},
+        "true",
+        cfg));
+    EXPECT_EQ(update.properties.kv_index_enabled.value, std::optional{true});
+    co_return;
+}
+
 TEST_F_CORO(topic_reconciler_test, test_topic_failure) {
     ::model::topic_namespace topic{
       ::model::kafka_namespace, ::model::topic{"test_topic"}};

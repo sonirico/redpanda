@@ -8,17 +8,23 @@
 // by the Apache License, Version 2.0
 
 #include "bytes/bytes.h"
+#include "cluster/shard_table.h"
 #include "cluster/topic_properties.h"
+#include "cluster/topics_frontend.h"
+#include "cluster/types.h"
 #include "config/configuration.h"
 #include "http/client.h"
+#include "metrics/metrics.h"
 #include "model/fundamental.h"
 #include "model/namespace.h"
 #include "pandaproxy/json/types.h"
 #include "pandaproxy/test/pandaproxy_fixture.h"
 #include "pandaproxy/test/utils.h"
+#include "test_utils/async.h"
 #include "test_utils/boost_fixture.h"
 #include "utils/base64.h"
 
+#include <seastar/core/metrics_api.hh>
 #include <seastar/core/sleep.hh>
 #include <seastar/core/smp.hh>
 
@@ -26,8 +32,10 @@
 #include <boost/test/tools/old/interface.hpp>
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
+#include <filesystem>
 #include <string_view>
 
 using namespace std::chrono_literals;
@@ -91,6 +99,20 @@ struct kv_fixture : pandaproxy_test_fixture {
           ppj::serialization_format::binary_v2,
           ppj::serialization_format::v2);
         BOOST_REQUIRE_EQUAL(res.headers.result(), bh::status::ok);
+    }
+
+    bool index_dir_exists() {
+        const auto topic_dir = data_dir / "kafka" / std::string_view(topic());
+        if (!std::filesystem::exists(topic_dir)) {
+            return false;
+        }
+        for (const auto& ntp_dir :
+             std::filesystem::directory_iterator(topic_dir)) {
+            if (std::filesystem::exists(ntp_dir.path() / "kv_index")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     consumed_response lookup(http::client& client, std::string_view key) {
@@ -193,4 +215,84 @@ FIXTURE_TEST(lookup_served_after_restart_without_new_writes, kv_fixture) {
     wait_for_controller_leadership().get();
     auto client = make_proxy_client();
     wait_for_value(client, "k", "v");
+}
+
+FIXTURE_TEST(lookup_of_partition_not_hosted_is_421, kv_fixture) {
+    add_indexed_topic(1);
+    auto client = make_proxy_client();
+
+    auto res = http_request(
+      client, fmt::format("/kv/{}/k?partition=1", topic()));
+
+    BOOST_REQUIRE_EQUAL(res.headers.result(), bh::status::misdirected_request);
+}
+
+FIXTURE_TEST(lookup_after_index_disabled_is_404_and_drops_index, kv_fixture) {
+    add_indexed_topic(1);
+    auto client = make_proxy_client();
+    produce(client, "k", "v", 0);
+    wait_for_value(client, "k", "v");
+    BOOST_REQUIRE(index_dir_exists());
+    cluster::topic_properties_update update({model::kafka_namespace, topic});
+    update.properties.kv_index_enabled.op
+      = cluster::incremental_update_operation::set;
+    update.properties.kv_index_enabled.value = false;
+    cluster::topic_properties_update_vector updates;
+    updates.push_back(std::move(update));
+
+    auto results = app.controller->get_topics_frontend()
+                     .local()
+                     .update_topic_properties(
+                       std::move(updates), model::no_timeout)
+                     .get();
+
+    BOOST_REQUIRE_EQUAL(results.size(), 1);
+    BOOST_REQUIRE_EQUAL(results[0].ec, cluster::errc::success);
+    RPTEST_REQUIRE_EVENTUALLY(10s, [this] { return !index_dir_exists(); });
+    auto res = lookup(client, "k");
+    BOOST_REQUIRE_EQUAL(res.headers.result(), bh::status::not_found);
+    BOOST_REQUIRE_EQUAL(res.body, "topic not indexed");
+}
+
+FIXTURE_TEST(deleting_indexed_topic_removes_its_directory, kv_fixture) {
+    add_indexed_topic(1);
+    auto client = make_proxy_client();
+    produce(client, "k", "v", 0);
+    wait_for_value(client, "k", "v");
+    BOOST_REQUIRE(index_dir_exists());
+
+    delete_topic(model::topic_namespace(model::kafka_namespace, topic)).get();
+
+    RPTEST_REQUIRE_EVENTUALLY(10s, [this] {
+        return !std::filesystem::exists(
+          data_dir / "kafka" / std::string_view(topic()));
+    });
+}
+
+FIXTURE_TEST(index_exports_next_offset_metric, kv_fixture) {
+    ss::smp::invoke_on_all([] {
+        config::shard_local_cfg().disable_metrics.set_value(false);
+    }).get();
+    add_indexed_topic(1);
+    const model::ntp ntp(model::kafka_namespace, topic, model::partition_id(0));
+    auto shard = app.shard_table.local().shard_for(ntp);
+    BOOST_REQUIRE(shard.has_value());
+
+    auto has_topic_metric = [] {
+        const auto& values = ss::metrics::impl::get_value_map();
+        auto family = values.find("cluster_kv_index_next_offset");
+        if (family == values.end()) {
+            return false;
+        }
+        return std::ranges::any_of(family->second, [](const auto& metric) {
+            const auto& labels = metric.first.labels();
+            auto label = labels.find(metrics::topic_label.name());
+            return label != labels.end() && label->second.value() == topic();
+        });
+    };
+
+    auto exported
+      = ss::smp::submit_to(*shard, std::move(has_topic_metric)).get();
+
+    BOOST_REQUIRE(exported);
 }
