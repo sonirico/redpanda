@@ -199,6 +199,13 @@ that lands on a broker that does not host the queried partition returns
 - Custom partitioners: since the endpoint's own partition resolution
   only knows the default murmur2 partitioner, callers that produced
   with a different partitioner must pass `?partition=N` explicitly.
+- Records produced through Pandaproxy: `POST /topics/{topic}` without a
+  partition places a key with murmur2 modulo the partition count,
+  without clearing the sign bit. About half of the keys land on a
+  different partition than the one the lookup derives, and the lookup
+  answers 404 for them unless `?partition=N` is given. Clearing the bit
+  there would move existing keys of REST producers to other partitions,
+  so it is left as it is.
 
 ## Detailed design - What needs to change to get there
 
