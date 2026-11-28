@@ -15,7 +15,7 @@ from ducktape.utils.util import wait_until
 from rptest.clients.rpk import RpkException, RpkTool
 from rptest.services.admin import Admin
 from rptest.services.cluster import cluster
-from rptest.services.redpanda import PandaproxyConfig, SISettings
+from rptest.services.redpanda import PandaproxyConfig, SecurityConfig, SISettings
 from rptest.tests.redpanda_test import RedpandaTest
 from rptest.util import expect_exception
 
@@ -148,6 +148,62 @@ class KvIndexTest(RedpandaTest):
 
         self._set_feature("active")
         rpk.alter_topic_config(TOPIC, "redpanda.kv.index.enabled", "true")
+
+
+class KvIndexAuthTest(RedpandaTest):
+    username = "kv-reader"
+    password = "kv-reader-0123456789"
+
+    def __init__(self, test_context: TestContext):
+        security = SecurityConfig()
+        security.enable_sasl = True
+        security.endpoint_authn_method = "sasl"
+        pandaproxy_config = PandaproxyConfig()
+        pandaproxy_config.authn_method = "http_basic"
+        super().__init__(
+            test_context,
+            num_brokers=3,
+            extra_rp_conf={"kv_index_enabled": True},
+            security=security,
+            pandaproxy_config=pandaproxy_config,
+        )
+
+    def _wait_lookup(self, auth: tuple[str, str], status: int) -> None:
+        node = self.redpanda.nodes[0]
+        wait_until(
+            lambda: requests.get(
+                f"http://{node.account.hostname}:{PANDAPROXY_PORT}/kv/{TOPIC}/k",
+                auth=auth,
+                timeout=10,
+            ).status_code
+            == status,
+            timeout_sec=60,
+            backoff_sec=1,
+        )
+
+    @cluster(num_nodes=3)
+    def test_lookup_requires_topic_read_acl(self) -> None:
+        rpk = RpkTool(self.redpanda)
+        rpk.create_topic(
+            TOPIC,
+            partitions=1,
+            replicas=3,
+            config={
+                "cleanup.policy": "compact",
+                "redpanda.kv.index.enabled": "true",
+            },
+        )
+        rpk.produce(TOPIC, "k", "v")
+        super_username, super_password, _ = self.redpanda.SUPERUSER_CREDENTIALS
+        self._wait_lookup((super_username, super_password), 200)
+        Admin(self.redpanda).create_user(
+            self.username, self.password, await_exists=True
+        )
+
+        self._wait_lookup((self.username, self.password), 403)
+
+        rpk.sasl_allow_principal(f"User:{self.username}", ["read"], "topic", TOPIC)
+        self._wait_lookup((self.username, self.password), 200)
 
 
 class KvIndexTieredTest(RedpandaTest):
