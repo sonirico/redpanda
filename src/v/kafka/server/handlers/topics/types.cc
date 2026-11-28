@@ -326,6 +326,9 @@ cluster::topic_configuration to_topic_config(
           = pandaproxy::schema_registry::context{std::move(*s)};
     }
 
+    cfg.properties.kv_index_enabled = get_bool_value(
+      config_entries, topic_property_kv_index_enabled);
+
     cfg.properties.min_cleanable_dirty_ratio = get_tristate_value<double>(
       config_entries, topic_property_min_cleanable_dirty_ratio);
 

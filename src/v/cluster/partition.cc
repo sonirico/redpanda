@@ -542,6 +542,33 @@ ss::future<> partition::start(
         std::optional<std::reference_wrapper<ss::abort_source>>) {
           return flush_archiver();
       });
+
+    if (kv_index_wanted()) {
+        co_await start_kv_indexer();
+    }
+}
+
+bool partition::kv_index_wanted() const {
+    const auto& cfg = _raft->log_config();
+    return cfg.kv_index_requested() && cfg.is_locally_compacted()
+           && config::shard_local_cfg().kv_index_enabled();
+}
+
+ss::future<> partition::start_kv_indexer() {
+    auto indexer = std::make_unique<cluster::kv_indexer>(_raft.get(), _rm_stm);
+    co_await indexer->start();
+    if (_as.abort_requested()) {
+        // stop() ran while the index was opening and did not see it.
+        co_await indexer->stop();
+        co_return;
+    }
+    _kv_indexer = std::move(indexer);
+}
+
+ss::future<> partition::stop_kv_indexer() {
+    // Unpublish first so that no new lookup starts on a closing index.
+    auto indexer = std::exchange(_kv_indexer, nullptr);
+    co_await indexer->stop();
 }
 
 ss::future<> partition::stop() {
@@ -550,6 +577,10 @@ ss::future<> partition::stop() {
     _as.request_abort();
 
     unregister_flush_hook(_archiver_flush_subscription);
+
+    if (_kv_indexer) {
+        co_await stop_kv_indexer();
+    }
 
     {
         // `partition_manager::do_shutdown` (caller of stop) will assert
@@ -894,6 +925,13 @@ ss::future<> partition::update_configuration(topic_properties new_properties) {
         cloud_storage_changed = true;
     }
 
+    if (kv_index_wanted() && !_kv_indexer) {
+        co_await start_kv_indexer();
+    } else if (!kv_index_wanted() && _kv_indexer) {
+        co_await stop_kv_indexer();
+        co_await kv_indexer::remove_index(_raft->log_config());
+    }
+
     // Update cached instance of topic properties
     if (_topic_cfg) {
         _topic_cfg->properties = std::move(new_properties);
@@ -978,6 +1016,7 @@ std::optional<model::term_id> partition::highest_cloud_term() const {
 ss::future<> partition::remove_persistent_state() {
     _cloud_storage_probe->clear_metrics();
     co_await _raft->stm_manager()->remove_local_state();
+    co_await kv_indexer::remove_index(_raft->log_config());
 }
 
 /**

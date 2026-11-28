@@ -35,7 +35,7 @@ namespace cluster {
  */
 struct topic_properties
   : serde::
-      envelope<topic_properties, serde::version<14>, serde::compat_version<0>> {
+      envelope<topic_properties, serde::version<15>, serde::compat_version<0>> {
     topic_properties() noexcept = default;
     topic_properties(
       std::optional<model::compression> compression,
@@ -88,7 +88,8 @@ struct topic_properties
       std::optional<bool> remote_topic_allow_gaps,
       std::optional<std::chrono::milliseconds> message_timestamp_before_max_ms,
       std::optional<std::chrono::milliseconds> message_timestamp_after_max_ms,
-      model::redpanda_storage_mode storage_mode)
+      model::redpanda_storage_mode storage_mode,
+      std::optional<bool> kv_index_enabled)
       : compression(compression)
       , cleanup_policy_bitflags(cleanup_policy_bitflags)
       , compaction_strategy(compaction_strategy)
@@ -139,7 +140,8 @@ struct topic_properties
       , max_compaction_lag_ms(max_compaction_lag_ms)
       , message_timestamp_before_max_ms(message_timestamp_before_max_ms)
       , message_timestamp_after_max_ms(message_timestamp_after_max_ms)
-      , storage_mode(storage_mode) {}
+      , storage_mode(storage_mode)
+      , kv_index_enabled(kv_index_enabled) {}
 
     std::optional<model::compression> compression;
     std::optional<model::cleanup_policy_bitflags> cleanup_policy_bitflags;
@@ -247,6 +249,10 @@ struct topic_properties
     model::redpanda_storage_mode storage_mode{
       storage::ntp_config::default_storage_mode};
 
+    // Whether the broker maintains a key index for this compacted topic,
+    // served by the Pandaproxy GET /kv/{topic}/{key} endpoint.
+    std::optional<bool> kv_index_enabled;
+
     bool is_local_topic() const;
 
     bool is_cloud_topic() const {
@@ -329,7 +335,8 @@ struct topic_properties
           message_timestamp_before_max_ms,
           message_timestamp_after_max_ms,
           storage_mode,
-          schema_registry_context);
+          schema_registry_context,
+          kv_index_enabled);
     }
 
     friend bool

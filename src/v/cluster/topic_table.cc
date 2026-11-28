@@ -1235,6 +1235,8 @@ topic_properties topic_table::update_topic_properties(
     incremental_update(
       updated_properties.schema_registry_context,
       overrides.schema_registry_context);
+    incremental_update(
+      updated_properties.kv_index_enabled, overrides.kv_index_enabled);
     return updated_properties;
 }
 
@@ -1280,6 +1282,10 @@ topic_table::apply(update_topic_properties_cmd cmd, model::offset o) {
 
     if (!schema_id_validation_validator::is_valid(updated_properties)) {
         co_return schema_id_validation_validator::ec;
+    }
+
+    if (!kv_index_validator::is_valid(updated_properties)) {
+        co_return kv_index_validator::ec;
     }
 
     // Apply the changes

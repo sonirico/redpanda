@@ -63,6 +63,44 @@ redpanda_cc_btest(
 )
 
 redpanda_cc_btest(
+    name = "kv",
+    timeout = "moderate",
+    srcs = [
+        "kv.cc",
+    ],
+    deps = [
+        "//src/v/bytes",
+        "//src/v/cluster",
+        "//src/v/cluster:client_quota_backend",
+        "//src/v/cluster:cluster_utils",
+        "//src/v/cluster:controller_log_limiter",
+        "//src/v/cluster:data_migration_table",
+        "//src/v/cluster:feature_backend",
+        "//src/v/cluster:leader_balancer_strategy",
+        "//src/v/cluster:node_status_backend",
+        "//src/v/cluster:self_test",
+        "//src/v/cluster:shard_table",
+        "//src/v/cluster:topic_configuration",
+        "//src/v/cluster:topic_metrics_watcher",
+        "//src/v/cluster:types",
+        "//src/v/config",
+        "//src/v/http",
+        "//src/v/metrics",
+        "//src/v/model",
+        "//src/v/pandaproxy:json",
+        "//src/v/pandaproxy/test:fixture",
+        "//src/v/pandaproxy/test:utils",
+        "//src/v/test_utils:seastar_boost",
+        "//src/v/utils:base64",
+        "@boost//:beast",
+        "@boost//:test",
+        "@fmt",
+        "@seastar",
+        "@seastar//:testing",
+    ],
+)
+
+redpanda_cc_btest(
     name = "list_topics",
     timeout = "short",
     srcs = [

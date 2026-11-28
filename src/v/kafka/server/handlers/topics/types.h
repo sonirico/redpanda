@@ -63,6 +63,9 @@ inline constexpr std::string_view topic_property_flush_bytes = "flush.bytes";
 inline constexpr std::string_view topic_property_schema_registry_context
   = "redpanda.schema.registry.context";
 
+inline constexpr std::string_view topic_property_kv_index_enabled
+  = "redpanda.kv.index.enabled";
+
 // Server side schema id validation
 inline constexpr std::string_view topic_property_record_key_schema_id_validation
   = "redpanda.key.schema.id.validation";

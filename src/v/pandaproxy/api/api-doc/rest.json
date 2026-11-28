@@ -548,6 +548,46 @@
         }
       }
     },
+    "/kv/{topic_name}/{key}": {
+      "get": {
+        "summary": "Look up the latest value for a key in a topic with redpanda.kv.index.enabled.",
+        "operationId": "get_kv",
+        "parameters": [
+          {
+            "name": "topic_name",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "partition",
+            "in": "query",
+            "required": false,
+            "type": "integer"
+          }
+        ],
+        "produces": [
+          "application/octet-stream"
+        ],
+        "responses": {
+          "200": {
+            "description": "Raw value bytes; headers X-Kv-Partition and X-Kv-Offset"
+          },
+          "404": {
+            "description": "Topic not indexed, or key not found"
+          },
+          "421": {
+            "description": "Partition not hosted on this node"
+          }
+        }
+      }
+    },
     "/status/ready": {
       "get": {
         "summary": "Health check",

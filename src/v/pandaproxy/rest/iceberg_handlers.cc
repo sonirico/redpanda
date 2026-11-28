@@ -19,10 +19,9 @@
 #include "model/namespace.h"
 #include "pandaproxy/logger.h"
 #include "pandaproxy/parsing/httpd.h"
+#include "pandaproxy/rest/topic_authorizer.h"
 #include "proto/redpanda/core/rest/iceberg.proto.h"
 #include "security/acl.h"
-#include "security/authorizer.h"
-#include "security/request_auth.h"
 
 namespace pandaproxy::rest {
 
@@ -150,23 +149,9 @@ get_translation_state(proxy::server::request_t rq, proxy::server::reply_t rp) {
 
     // Filter out topics the user is not authorized to describe.
     if (rq.authn_method != config::rest_authn_method::none) {
-        auto auth_result = rq.context().authenticator.authenticate(*rq.req);
-        auth_result.pass();
-        auto principal = security::acl_principal{
-          security::principal_type::user, rq.user.name};
-        auto host = security::acl_host{rq.req->get_client_address().addr()};
-        auto& groups = auth_result.get_groups();
+        topic_authorizer authorizer(rq, security::acl_operation::describe);
         auto is_authorized = [&](const model::topic& topic) {
-            return rq.service()
-              .authorizer()
-              .authorized(
-                topic,
-                security::acl_operation::describe,
-                principal,
-                host,
-                security::superuser_required::no,
-                groups)
-              .is_authorized();
+            return authorizer.authorized(topic);
         };
         std::erase_if(topic_states, [&](const auto& entry) {
             return !is_authorized(entry.first);

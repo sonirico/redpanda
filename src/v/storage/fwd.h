@@ -16,6 +16,7 @@ namespace storage {
 class api;
 class compacted_index_writer;
 class compaction_controller;
+class kv_index;
 class kvstore;
 class node_api;
 class ntp_config;

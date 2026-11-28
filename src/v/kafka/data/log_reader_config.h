@@ -38,6 +38,10 @@ struct log_reader_config {
     // that the reader will return no batches.
     bool strict_max_bytes{false};
 
+    // do not take a reader from, or leave one in, the log's readers cache.
+    // For reads that are not followed by a read of the next offset.
+    bool skip_readers_cache{false};
+
     log_reader_config(
       kafka::offset start_offset,
       kafka::offset max_offset,

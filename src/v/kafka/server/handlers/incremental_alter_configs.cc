@@ -464,6 +464,16 @@ create_topic_properties_update(
                   });
                 continue;
             }
+            if (cfg.name == topic_property_kv_index_enabled) {
+                parse_and_set_optional_bool_alpha(
+                  update.properties.kv_index_enabled,
+                  cfg.value,
+                  op,
+                  kv_index_enabled_validator{
+                    ctx.feature_table().local().is_active(
+                      features::feature::kv_index)});
+                continue;
+            }
 
             if (cfg.name == topic_property_min_cleanable_dirty_ratio) {
                 parse_and_set_tristate(
